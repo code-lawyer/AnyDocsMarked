@@ -1,7 +1,11 @@
 from pathlib import Path
 
+import pytest
+
 import makeitdown.convert_legacy as cl
-from makeitdown.models import ConversionResult, LegacyConversionUnavailable
+from makeitdown.models import (
+    ConversionResult, ConversionUnavailable, LegacyConversionUnavailable,
+)
 
 OLE2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP = b"PK\x03\x04"
@@ -187,3 +191,29 @@ def test_com_short_circuits_off_windows(tmp_path, monkeypatch):
 def test_libreoffice_short_circuits_without_soffice(tmp_path, monkeypatch):
     monkeypatch.setattr(cl.shutil, "which", lambda name: None)
     assert cl._convert_via_libreoffice(tmp_path / "x.doc", tmp_path) is None
+
+
+def test_ole2_falls_back_to_anydoc(monkeypatch, tmp_path):
+    f = tmp_path / "old.doc"
+    f.write_bytes(OLE2 + b"binary")
+    monkeypatch.setattr(cl, "_convert_via_com", lambda s, o: False)
+    monkeypatch.setattr(cl, "_convert_via_libreoffice", lambda s, d: None)
+    monkeypatch.setattr(cl, "convert_anydoc",
+                        lambda p: ConversionResult(text="# 判决书", engine="anydoc"))
+    r = cl.convert(f)
+    assert r.engine == "legacy:anydoc"
+    assert "判决书" in r.text
+
+
+def test_ole2_all_backends_fail_raises_legacy(monkeypatch, tmp_path):
+    f = tmp_path / "old.doc"
+    f.write_bytes(OLE2 + b"binary")
+    monkeypatch.setattr(cl, "_convert_via_com", lambda s, o: False)
+    monkeypatch.setattr(cl, "_convert_via_libreoffice", lambda s, d: None)
+
+    def boom(p):
+        raise ConversionUnavailable("anydoc 读不了")
+
+    monkeypatch.setattr(cl, "convert_anydoc", boom)
+    with pytest.raises(LegacyConversionUnavailable):
+        cl.convert(f)

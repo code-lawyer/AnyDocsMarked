@@ -21,8 +21,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from .convert_anydoc import convert as convert_anydoc
 from .convert_native import convert as convert_native
-from .models import ConversionResult, LegacyConversionUnavailable
+from .models import ConversionResult, ConversionUnavailable, LegacyConversionUnavailable
 
 # A single Word/WPS COM operation can take seconds; cap it so one hung document
 # can't block a worker forever.
@@ -220,5 +221,11 @@ def convert(path: Path) -> ConversionResult:
             produced = _convert_via_libreoffice(src, td_path)
             if produced and produced.exists():
                 return _relabel(convert_native(produced), "legacy:libreoffice->markitdown")
+
+            # 最后兜底:anydoc 直接读 OLE 二进制,无需任何外部程序。
+            try:
+                return _relabel(convert_anydoc(src), "legacy:anydoc")
+            except ConversionUnavailable:
+                pass
 
         raise LegacyConversionUnavailable(_HINT)
