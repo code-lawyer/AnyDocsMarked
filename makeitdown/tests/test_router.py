@@ -1,4 +1,17 @@
+import pytest
+
 import makeitdown.router as router
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("a.ppt", "anydoc"), ("a.xls", "anydoc"), ("a.xlsb", "anydoc"),
+    ("a.doc", "legacy"), ("a.wps", "legacy"),
+    ("a.PPT", "anydoc"), ("a.Xls", "anydoc"),  # 扩展名大小写不敏感
+])
+def test_anydoc_and_legacy_routing(tmp_path, name, expected):
+    p = tmp_path / name
+    p.write_bytes(b"")  # 非 PDF 路由仅看扩展名,内容无关
+    assert router.classify(p) == expected
 
 
 def test_native_extensions(tmp_path):
