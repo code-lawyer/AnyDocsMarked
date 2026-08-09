@@ -1,6 +1,9 @@
 import json
 import hashlib
 import os
+import shutil
+from pathlib import Path
+
 import makeitdown.pipeline as pl
 import makeitdown.pipeline as pipeline_mod
 from makeitdown import convert_anydoc
@@ -698,3 +701,19 @@ def test_pipeline_anydoc_unconvertible_is_skipped(monkeypatch, tmp_path):
     )
     assert report["skipped_unsupported"] == 1
     assert report["skipped"] and "无法解析" in report["skipped"][0]["reason"]
+
+
+def test_real_xls_roundtrip_through_anydoc(tmp_path):
+    fixture = Path(__file__).parent / "fixtures" / "ledger.xls"
+    (tmp_path / "in").mkdir()
+    shutil.copy(fixture, tmp_path / "in" / "ledger.xls")
+    report = pl.convert_tree(
+        tmp_path / "in", tmp_path / "out",
+        ocr_engine="local", ocr_model="", cloud_token=None, workers=1,
+        skip_existing=False, text_threshold=50, report_path=tmp_path / "report.json",
+        progress=False,
+    )
+    assert report["failed"] == 0
+    md = (tmp_path / "out" / "ledger.md").read_text(encoding="utf-8")
+    assert "engine: anydoc" in md
+    assert "1,234,567.89" in md  # 金额逐字保真(真 anydoc 转换)
