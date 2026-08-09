@@ -91,10 +91,10 @@ except ConversionUnavailable as e:   # 由 LegacyConversionUnavailable 泛化而
 
 `.ppt/.xls/.xlsb` 直转失败与 `.doc` 兜底失败,统一落 `report["skipped"]` + 提示(供 lawiki `reconcile.py` 源级审计),绝不中断整批。成功产出照跑质检(空白/乱码标 `quality: suspect`)。
 
-### 6. `pyproject.toml` + 离线包
+### 6. `pyproject.toml`(无离线包改动)
 
 - `dependencies` 加 `firecrawl-anydoc`。
-- Release 离线包 vendor 对应平台 wheel(与现有 vendor ONNX 同机制);release 工作流机器校验 wheel 存在。
+- **离线包零改动**:`-offline.zip` 只 vendor rag-retriever 的 embedding ONNX(解决**运行期**离线出向量);makeitdown 的依赖(markitdown/pymupdf/paddle…)本就在 `install.py` 里由 uv 从镜像**装时拉取**。`firecrawl-anydoc`(零依赖 abi3 wheel)走同一条路,无需 vendor、无需 release 校验改动。真air-gapped 装机场景本就无法装 markitdown/paddle,anydoc 不改变这一posture。
 
 ## 数据流
 
