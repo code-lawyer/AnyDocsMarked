@@ -26,6 +26,10 @@ class OCRUnavailableError(RuntimeError):
     """Raised when no usable OCR backend is configured/available."""
 
 
-class LegacyConversionUnavailable(RuntimeError):
-    """Raised when a legacy binary (.doc/.wps) can't be converted because no
-    backend is available. Carries an actionable hint for the user."""
+class ConversionUnavailable(RuntimeError):
+    """文件可识别但当前后端无法转换(无可用转换器 / 加密 / 损坏)。
+    携带可执行提示;pipeline 将其转为"知情跳过"而非失败。"""
+
+
+class LegacyConversionUnavailable(ConversionUnavailable):
+    """老式二进制(.doc/.wps)无 COM/LibreOffice/anydoc 后端可用。带可执行提示。"""

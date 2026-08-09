@@ -1,4 +1,9 @@
-from makeitdown.models import ConversionResult, OCRUnavailableError
+from makeitdown.models import ConversionResult, ConversionUnavailable, LegacyConversionUnavailable, OCRUnavailableError
+
+
+def test_legacy_unavailable_is_conversion_unavailable():
+    assert issubclass(LegacyConversionUnavailable, ConversionUnavailable)
+    assert issubclass(ConversionUnavailable, RuntimeError)
 
 
 def test_conversion_result_defaults():
@@ -7,6 +12,11 @@ def test_conversion_result_defaults():
     assert r.engine == "markitdown"
     assert r.pages is None
     assert r.assets == {}
+
+
+def test_conversion_result_defaults_anydoc():
+    r = ConversionResult(text="x", engine="anydoc")
+    assert r.pages is None and r.assets == {} and r.confidences is None
 
 
 def test_conversion_result_assets_are_independent():
