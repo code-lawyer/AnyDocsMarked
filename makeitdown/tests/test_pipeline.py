@@ -3,7 +3,8 @@ import hashlib
 import os
 import makeitdown.pipeline as pl
 import makeitdown.pipeline as pipeline_mod
-from makeitdown.models import ConversionResult, LegacyConversionUnavailable
+from makeitdown import convert_anydoc
+from makeitdown.models import ConversionResult, ConversionUnavailable, LegacyConversionUnavailable
 
 
 def _setup_tree(tmp_path):
@@ -662,3 +663,38 @@ def test_progress_marks_failure_with_error(tmp_path, monkeypatch, capsys):
                     text_threshold=50, report_path=tmp_path / "out" / "report.json")
     err = capsys.readouterr().err
     assert "[1/1] ✗ bad.docx" in err and "broken file" in err
+
+
+def test_pipeline_routes_xls_to_anydoc(monkeypatch, tmp_path):
+    (tmp_path / "in").mkdir()
+    (tmp_path / "in" / "ledger.xls").write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1x")
+    monkeypatch.setattr(convert_anydoc, "convert",
+                        lambda p: ConversionResult(text="# 流水\n100000.00", engine="anydoc"))
+    report = pl.convert_tree(
+        tmp_path / "in", tmp_path / "out",
+        ocr_engine="local", ocr_model="", cloud_token=None, workers=1,
+        skip_existing=False, text_threshold=50, report_path=tmp_path / "report.json",
+        progress=False,
+    )
+    assert report["succeeded"] + report["warned"] == 1
+    md = (tmp_path / "out" / "ledger.md").read_text(encoding="utf-8")
+    assert "engine: anydoc" in md
+    assert "流水" in md
+
+
+def test_pipeline_anydoc_unconvertible_is_skipped(monkeypatch, tmp_path):
+    (tmp_path / "in").mkdir()
+    (tmp_path / "in" / "deck.ppt").write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1x")
+
+    def boom(p):
+        raise ConversionUnavailable("anydoc 无法解析 .ppt —— 跳过。")
+
+    monkeypatch.setattr(convert_anydoc, "convert", boom)
+    report = pl.convert_tree(
+        tmp_path / "in", tmp_path / "out",
+        ocr_engine="local", ocr_model="", cloud_token=None, workers=1,
+        skip_existing=False, text_threshold=50, report_path=tmp_path / "report.json",
+        progress=False,
+    )
+    assert report["skipped_unsupported"] == 1
+    assert report["skipped"] and "无法解析" in report["skipped"][0]["reason"]

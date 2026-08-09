@@ -10,13 +10,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
+from . import convert_anydoc as _convert_anydoc_mod
 from .convert_legacy import convert as convert_legacy
 from .convert_native import convert as convert_native
 from .convert_ocr import OCRDispatcher
 from .frontmatter import build_frontmatter, prepend_frontmatter
-from .models import LegacyConversionUnavailable
+from .models import ConversionUnavailable
 from .quality import QualityThresholds, assess
 from .router import IGNORED_FILENAMES, classify
+
+
+def convert_anydoc(src: Path):
+    # Thin wrapper, not `from .convert_anydoc import convert as convert_anydoc`:
+    # a direct function import binds the object at module-import time, so
+    # `monkeypatch.setattr(convert_anydoc, "convert", ...)` in tests (which
+    # patches the makeitdown.convert_anydoc submodule) would silently miss —
+    # this indirection does the attribute lookup at call time instead.
+    return _convert_anydoc_mod.convert(src)
 
 
 # 进度行状态字形（打到 stderr，供长任务时人/agent 感知进度；见 SKILL.md 长任务模式）。
@@ -261,6 +271,8 @@ def convert_tree(
                 result = convert_native(src)
             elif route == "legacy":
                 result = convert_legacy(src)
+            elif route == "anydoc":
+                result = convert_anydoc(src)
             else:
                 result = dispatcher.convert(src)
                 # OCR output is flat; optionally rebuild heading levels via LLM.
@@ -289,7 +301,7 @@ def convert_tree(
             if reasons:
                 return ("warned", rel, reasons, structured_ok, n_omitted)
             return ("succeeded", rel, None, structured_ok, n_omitted)
-        except LegacyConversionUnavailable as e:
+        except ConversionUnavailable as e:
             # Recognized but no converter available: skip knowingly with a hint.
             return ("skipped_unsupported", rel, str(e), False, 0)
         except Exception as e:  # never abort the batch
