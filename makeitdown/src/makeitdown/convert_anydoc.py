@@ -28,6 +28,6 @@ def convert(path: Path) -> ConversionResult:
         anydoc.ConvertError,
     ) as e:
         raise ConversionUnavailable(
-            f"anydoc 无法解析 {path.suffix or '该文件'}({type(e).__name__})—— 跳过。"
+            f"anydoc 无法解析 {path.suffix or '该文件'}({type(e).__name__}) —— 跳过。"
         ) from e
     return ConversionResult(text=text, engine=_ENGINE, pages=None)

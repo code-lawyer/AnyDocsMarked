@@ -21,3 +21,5 @@
 *.onnx binary
 *.bin binary
 *.pdf binary
+*.xls binary
+*.doc binary
