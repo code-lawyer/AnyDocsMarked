@@ -1,7 +1,7 @@
 [project]
 name = "rag-retriever"
 # Tracks the AnyDocsMarked bundle release tag (vX.Y.Z); bump together when tagging.
-version = "1.7.1"
+version = "1.8.0"
 description = "A lightweight, local-first document retrieval engine that mounts to an agent as an MCP tool. Drop files in; the agent searches and answers with its own LLM."
 readme = "README.md"
 license = { text = "MIT" }

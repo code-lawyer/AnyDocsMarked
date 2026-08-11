@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## 1.8.0 - 2026-08-08
+
+### Added
+
+- makeitdown 引入 `firecrawl-anydoc`(进程内 Rust 解析器,零依赖),补齐老式二进制 Office 转换:`.doc/.wps` 在 COM(Word/WPS)/LibreOffice 之后新增 anydoc 兜底(引擎标 `legacy:anydoc`),免掉"未装 Office/LibreOffice 就跳过老 .doc"的外部依赖;`.ppt/.xls/.xlsb` 由过去的"不支持"改为 anydoc 直转。加密件跳过并提示。markitdown 仍为原生格式引擎,不受影响。
+
+### Changed
+
+- 转换失败语义统一:新增 `ConversionUnavailable` 基类(`LegacyConversionUnavailable` 为其子类),anydoc 的类型化异常经其转为"知情跳过"(进 `report["skipped"]` 带提示),绝不误报为 failure、绝不中断整批。
+
 ## 1.7.1 - 2026-07-22
 
 ### Fixed
