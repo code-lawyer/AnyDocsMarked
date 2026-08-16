@@ -8,9 +8,14 @@
 from __future__ import annotations
 
 import json
+import queue
 import re
+import subprocess
 import sys
+import tkinter as tk
+import webbrowser
 from pathlib import Path
+from tkinter import filedialog, messagebox
 
 _PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]\s+(.)\s+(.*)$")
 _GLYPH_STATUS = {"✓": "succeeded", "⚠": "warned", "✗": "failed",
@@ -67,3 +72,101 @@ def save_gui_config(path: Path, cfg: dict) -> None:
     # 只持久化 engine；token 绝不落盘。
     path.write_text(json.dumps({"engine": cfg.get("engine", "auto")},
                                ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+AISTUDIO_URL = "https://aistudio.baidu.com/paddleocr"
+_TRADEOFF = (
+    "本地版：文档不出本机、离线、免费；但要下载几百 MB 模型、吃电脑性能、较慢。\n"
+    "云端版：装得小、快；但要去百度 AI Studio 申请 token、需联网、文档会上传。\n"
+    "auto：装了本地就用本地，否则在你已配 token+同意时才用云端，绝不静默上传。\n\n"
+    "⚖ 案卷含机密材料时优先本地；机器弱又非机密可选云端。"
+)
+
+
+class IngestApp(tk.Tk):
+    def __init__(self, config_path: Path | None = None):
+        super().__init__()
+        self.title("AnyDocsMarked · 案卷摄入")
+        self.geometry("640x520")
+        self._config_path = config_path or (Path.home() / ".anydocsmarked-gui.json")
+        self.case_dir: Path | None = None
+        cfg = load_gui_config(self._config_path)
+        self.engine = tk.StringVar(value=cfg["engine"])
+        self.consent = tk.BooleanVar(value=False)
+        self.token_var = tk.StringVar(value="")
+        self._proc: subprocess.Popen | None = None
+        self._q: queue.Queue = queue.Queue()
+        self._container = tk.Frame(self)
+        self._container.pack(fill="both", expand=True, padx=16, pady=16)
+        self._build_choice_screen()
+
+    def _clear(self) -> None:
+        for w in self._container.winfo_children():
+            w.destroy()
+
+    def _build_choice_screen(self) -> None:
+        self._clear()
+        tk.Label(self._container, text="① 选择案件目录（含 原始资料/）",
+                 font=("", 12, "bold")).pack(anchor="w")
+        row = tk.Frame(self._container); row.pack(fill="x", pady=6)
+        self._folder_lbl = tk.Label(row, text="（未选择）", fg="gray")
+        self._folder_lbl.pack(side="left")
+        tk.Button(row, text="选择文件夹…", command=self._on_pick_folder).pack(side="right")
+
+        tk.Label(self._container, text="② OCR 方式", font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        tk.Message(self._container, text=_TRADEOFF, width=580, fg="#333").pack(anchor="w")
+        for val, txt in [("auto", "auto（推荐）"), ("local", "本地版"), ("cloud", "云端版")]:
+            tk.Radiobutton(self._container, text=txt, variable=self.engine, value=val,
+                           command=self._refresh_cloud_box).pack(anchor="w")
+
+        self._cloud_box = tk.Frame(self._container)
+        self._cloud_box.pack(fill="x", pady=8)
+        self._refresh_cloud_box()
+
+        tk.Button(self._container, text="开始摄入 ▶", font=("", 12, "bold"),
+                  command=self._on_start).pack(pady=16)
+
+    def _refresh_cloud_box(self) -> None:
+        for w in self._cloud_box.winfo_children():
+            w.destroy()
+        if self.engine.get() not in ("cloud", "auto"):
+            return
+        tk.Label(self._cloud_box, text="云端 token（仅云端时需要；留空则本地/auto 不受影响）"
+                 ).pack(anchor="w")
+        r = tk.Frame(self._cloud_box); r.pack(fill="x")
+        tk.Entry(r, textvariable=self.token_var, show="•", width=48).pack(side="left")
+        tk.Button(r, text="去申请", command=lambda: webbrowser.open(AISTUDIO_URL)).pack(side="left", padx=6)
+        tk.Checkbutton(self._cloud_box, text="我已知晓并同意：云端会把文档上传至百度 AI Studio",
+                       variable=self.consent).pack(anchor="w", pady=4)
+
+    def _on_pick_folder(self) -> None:
+        d = filedialog.askdirectory()
+        if d:
+            self.case_dir = Path(d)
+            self._folder_lbl.config(text=str(self.case_dir), fg="black")
+
+    def _on_start(self) -> None:
+        if self.case_dir is None:
+            messagebox.showwarning("缺少目录", "请先选择案件目录。"); return
+        if self.engine.get() == "cloud" and not self.consent.get():
+            messagebox.showwarning("需要同意", "云端会上传文档，请勾选同意，或改用 本地/auto。"); return
+        save_gui_config(self._config_path, {"engine": self.engine.get()})
+        self._build_run_screen()  # 下一任务实现
+
+    # 占位，Task 3 实现
+    def _build_run_screen(self) -> None:
+        self._clear()
+        tk.Label(self._container, text="（运行屏占位——Task 3 实现）").pack()
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    IngestApp().mainloop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
