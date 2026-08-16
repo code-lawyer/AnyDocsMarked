@@ -89,5 +89,74 @@ class PreflightTests(unittest.TestCase):
                 self.assertIsNone(ingest._preflight(raw))
 
 
+class _FakeProc:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode; self.stdout = stdout; self.stderr = stderr
+
+
+class RunnerTests(unittest.TestCase):
+    def test_init_case_argv(self):
+        with mock.patch.object(ingest.subprocess, "run", return_value=_FakeProc(0)) as m:
+            ingest._run_init_case(Path("/x"), dry_run=False)
+        argv = m.call_args.args[0]
+        self.assertEqual(argv[0], sys.executable)
+        self.assertTrue(argv[1].endswith("init_case.py"))
+        self.assertEqual(argv[2], "/x")
+
+    def test_convert_reads_report_and_flags(self):
+        with tempfile.TemporaryDirectory() as td:
+            md = Path(td) / "_md"; md.mkdir()
+            (md / "report.json").write_text(json.dumps({"succeeded": 2}), encoding="utf-8")
+            with mock.patch.object(ingest.subprocess, "run", return_value=_FakeProc(0)) as m:
+                report, rc = ingest._run_convert(
+                    Path(td) / "原始资料", md, ocr_engine="cloud", cloud_consent=True,
+                    workers=1, skip_existing=True, dry_run=False)
+            argv = m.call_args.args[0]
+            self.assertEqual(argv[0], "makeitdown")
+            self.assertIn("--cloud-consent", argv)
+            self.assertIn("--skip-existing", argv)
+            self.assertIn("--ocr-engine", argv)
+            self.assertEqual(report["succeeded"], 2)
+            self.assertEqual(rc, 0)
+
+    def test_convert_no_report_returns_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            md = Path(td) / "_md"; md.mkdir()
+            with mock.patch.object(ingest.subprocess, "run", return_value=_FakeProc(2)):
+                report, rc = ingest._run_convert(
+                    Path(td) / "原始资料", md, ocr_engine="cloud", cloud_consent=False,
+                    workers=1, skip_existing=False, dry_run=False)
+            self.assertIsNone(report)
+            self.assertEqual(rc, 2)
+
+    def test_index_parses_json(self):
+        with mock.patch.object(ingest.subprocess, "run",
+                               return_value=_FakeProc(0, stdout='{"files_indexed":3,"files_skipped":0}')):
+            result, ran = ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
+        self.assertTrue(ran); self.assertEqual(result["files_indexed"], 3)
+
+    def test_index_not_installed_degrades(self):
+        with mock.patch.object(ingest.subprocess, "run", side_effect=FileNotFoundError()):
+            result, ran = ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
+        self.assertFalse(ran); self.assertIsNone(result)
+
+    def test_index_nonzero_marks_empty(self):
+        with mock.patch.object(ingest.subprocess, "run", return_value=_FakeProc(1, stdout="")):
+            result, ran = ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
+        self.assertTrue(ran); self.assertEqual(result, {"files_indexed": 0, "files_skipped": 0})
+
+    def test_reconcile_clean(self):
+        with mock.patch.object(ingest.subprocess, "run",
+                               return_value=_FakeProc(0, stdout="源级对账：2 源文件 | 已产出 2 | 已登记跳过 0 | 未处置 0")):
+            self.assertEqual(ingest._run_reconcile(Path("/x"), dry_run=False), [])
+
+    def test_reconcile_unresolved(self):
+        out = ("源级对账：3 源文件 | 已产出 2 | 已登记跳过 0 | 未处置 1\n"
+               "[未处置源级遗漏] 原始资料/老合同.doc")
+        with mock.patch.object(ingest.subprocess, "run", return_value=_FakeProc(1, stdout=out)):
+            reasons = ingest._run_reconcile(Path("/x"), dry_run=False)
+        self.assertEqual(reasons, ["[未处置源级遗漏] 原始资料/老合同.doc"])
+
+
 if __name__ == "__main__":
     unittest.main()

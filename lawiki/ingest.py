@@ -96,3 +96,80 @@ def _gate_and_merge(case_dir: Path, convert: dict, index: dict, md_file_count: i
         "gate": {"passed": exit_code == EXIT_PASS, "reasons": reasons},
         "exit_code": exit_code,
     }
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text); fh.flush(); os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _run_init_case(case_dir: Path, *, dry_run: bool) -> None:
+    cmd = [sys.executable, (_TOOLS / "init_case.py").as_posix(), case_dir.as_posix()]
+    _say("将执行: " + " ".join(cmd))
+    if dry_run:
+        return
+    subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")
+
+
+def _run_convert(raw_dir: Path, md_dir: Path, *, ocr_engine: str, cloud_consent: bool,
+                 workers: int, skip_existing: bool, dry_run: bool) -> tuple[dict | None, int]:
+    cmd = ["makeitdown", raw_dir.as_posix(), "-o", md_dir.as_posix(),
+           "--ocr-engine", ocr_engine, "--workers", str(workers)]
+    if cloud_consent:
+        cmd.append("--cloud-consent")
+    if skip_existing:
+        cmd.append("--skip-existing")
+    _say("将执行: " + " ".join(cmd))
+    if dry_run:
+        return None, 0
+    proc = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")
+    report_path = md_dir / "report.json"
+    if report_path.is_file():
+        try:
+            return json.loads(report_path.read_text(encoding="utf-8")), proc.returncode
+        except ValueError:
+            return None, proc.returncode
+    return None, proc.returncode
+
+
+def _run_index(md_dir: Path, case_dir: Path, rag_dir: Path, *,
+               dry_run: bool) -> tuple[dict | None, bool]:
+    cmd = [*_rag_cmd(), "--data-dir", rag_dir.as_posix(), "index", md_dir.as_posix(),
+           "--source-root", case_dir.as_posix()]
+    _say("将执行: " + " ".join(cmd))
+    if dry_run:
+        return None, True
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        _say("⏭ 未安装 rag-retriever，跳过建索引（问答将退化仅 wiki）")
+        return None, False
+    if proc.returncode != 0:
+        _say(f"✗ 建索引失败（退出码 {proc.returncode}）：{(proc.stderr or '').strip()[:200]}")
+        return {"files_indexed": 0, "files_skipped": 0}, True
+    try:
+        return json.loads(proc.stdout), True
+    except ValueError:
+        _say("✗ 建索引退出 0 但输出非 JSON，视为未完成")
+        return {"files_indexed": 0, "files_skipped": 0}, True
+
+
+def _run_reconcile(case_dir: Path, *, dry_run: bool) -> list[str]:
+    cmd = [sys.executable, (_TOOLS / "reconcile.py").as_posix(), case_dir.as_posix()]
+    _say("将执行: " + " ".join(cmd))
+    if dry_run:
+        return []
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode == 0:
+        return []
+    reasons = [ln for ln in proc.stdout.splitlines()
+               if ln.strip() and not ln.startswith("源级对账")]
+    return reasons or [f"源级对账未通过（退出码 {proc.returncode}）：{(proc.stderr or '').strip()[:200]}"]
