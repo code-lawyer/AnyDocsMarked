@@ -173,3 +173,72 @@ def _run_reconcile(case_dir: Path, *, dry_run: bool) -> list[str]:
     reasons = [ln for ln in proc.stdout.splitlines()
                if ln.strip() and not ln.startswith("源级对账")]
     return reasons or [f"源级对账未通过（退出码 {proc.returncode}）：{(proc.stderr or '').strip()[:200]}"]
+
+
+def main(argv: list[str]) -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    p = argparse.ArgumentParser(prog="ingest.py", description="AnyDocsMarked 摄入引擎")
+    p.add_argument("case_dir", help="案件目录（含 原始资料/ 子目录）")
+    p.add_argument("--ocr-engine", choices=["auto", "local", "cloud"], default="auto")
+    p.add_argument("--cloud-consent", action="store_true",
+                   help="同意把文档/文本发往外部 OCR（透传给 makeitdown；不加则云端被阻断）")
+    p.add_argument("--workers", type=int, default=os.cpu_count() or 4)
+    p.add_argument("--skip-existing", action="store_true")
+    p.add_argument("--skip-index", action="store_true", help="只转换、不建 .rag 索引")
+    p.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")
+    args = p.parse_args(argv)
+
+    case = Path(args.case_dir).resolve()
+    raw, md, rag = case / "原始资料", case / "_md", case / ".rag"
+
+    _run_init_case(case, dry_run=args.dry_run)
+
+    err = _preflight(raw)
+    if err and not args.dry_run:
+        _say("✗ " + err)
+        return EXIT_PREFLIGHT
+
+    convert, rc = _run_convert(
+        raw, md, ocr_engine=args.ocr_engine, cloud_consent=args.cloud_consent,
+        workers=args.workers, skip_existing=args.skip_existing, dry_run=args.dry_run)
+
+    if args.dry_run:
+        _run_index(md, case, rag, dry_run=True)
+        _run_reconcile(case, dry_run=True)
+        _say("（dry-run：未真正执行，未写 ingest-report.json）")
+        return EXIT_PASS
+
+    if convert is None:
+        _say(f"✗ 转换未产出 report.json（makeitdown 退出码 {rc}）——"
+             f"常见：选了云端 OCR 但未加 --cloud-consent，或输入路径非法。")
+        return EXIT_PREFLIGHT
+
+    if args.skip_index:
+        index, index_ran = {}, False
+    else:
+        index, index_ran = _run_index(md, case, rag, dry_run=False)
+        index = index or {}
+
+    reconcile_reasons = _run_reconcile(case, dry_run=False)
+
+    merged = _gate_and_merge(case, convert, index, _count_md_files(md),
+                             reconcile_reasons, index_ran=index_ran)
+    _atomic_write_text(case / "ingest-report.json",
+                       json.dumps(merged, ensure_ascii=False, indent=2))
+
+    g = merged["gate"]
+    _say(f"—— 摄入结果 —— gate={'通过' if g['passed'] else '未通过'}，退出码 {merged['exit_code']}")
+    for reason in g["reasons"]:
+        _say("  • " + reason)
+    _say(f"报告：{case / 'ingest-report.json'}")
+    if g["passed"]:
+        _say("下一步：让 agent 加载 lawiki，对 _md/ 建 wiki（LLM 环节，不在本引擎内）。")
+    return merged["exit_code"]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

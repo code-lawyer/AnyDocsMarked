@@ -158,5 +158,96 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(reasons, ["[未处置源级遗漏] 原始资料/老合同.doc"])
 
 
+class MainTests(unittest.TestCase):
+    def _case(self, td):
+        case = Path(td) / "case"; raw = case / "原始资料"; raw.mkdir(parents=True)
+        (raw / "a.txt").write_text("甲方向乙方借款五万元。", encoding="utf-8")
+        return case
+
+    def test_default_engine_is_auto(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._case(td); (case / "_md").mkdir()
+            (case / "_md" / "a.md").write_text("x", encoding="utf-8")
+            captured = {}
+            def fake_convert(raw, md, *, ocr_engine, **kw):
+                captured["engine"] = ocr_engine
+                return {"succeeded": 1, "failed": 0}, 0
+            with mock.patch.object(ingest.shutil, "which", return_value="mk"), \
+                 mock.patch.object(ingest, "_run_init_case"), \
+                 mock.patch.object(ingest, "_run_convert", side_effect=fake_convert), \
+                 mock.patch.object(ingest, "_run_index", return_value=({"files_indexed": 1, "files_skipped": 0}, True)), \
+                 mock.patch.object(ingest, "_run_reconcile", return_value=[]):
+                ingest.main([str(case)])
+            self.assertEqual(captured["engine"], "auto")
+
+    def test_preflight_failure_returns_2(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td) / "case"
+            with mock.patch.object(ingest, "_run_init_case"):
+                rc = ingest.main([str(case)])
+            self.assertEqual(rc, ingest.EXIT_PREFLIGHT)
+            self.assertFalse((case / "ingest-report.json").exists())
+
+    def test_convert_no_report_returns_2(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._case(td)
+            with mock.patch.object(ingest.shutil, "which", return_value="mk"), \
+                 mock.patch.object(ingest, "_run_init_case"), \
+                 mock.patch.object(ingest, "_run_convert", return_value=(None, 2)):
+                rc = ingest.main([str(case), "--ocr-engine", "cloud"])
+            self.assertEqual(rc, ingest.EXIT_PREFLIGHT)
+
+    def test_happy_path_returns_0_and_writes_report(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._case(td); (case / "_md").mkdir()
+            (case / "_md" / "借条.md").write_text("x", encoding="utf-8")
+            with mock.patch.object(ingest.shutil, "which", return_value="mk"), \
+                 mock.patch.object(ingest, "_run_init_case"), \
+                 mock.patch.object(ingest, "_run_convert", return_value=({"succeeded": 1, "failed": 0}, 0)), \
+                 mock.patch.object(ingest, "_run_index", return_value=({"files_indexed": 1, "files_skipped": 0}, True)), \
+                 mock.patch.object(ingest, "_run_reconcile", return_value=[]):
+                rc = ingest.main([str(case), "--ocr-engine", "local"])
+            self.assertEqual(rc, ingest.EXIT_PASS)
+            merged = json.loads((case / "ingest-report.json").read_text(encoding="utf-8"))
+            self.assertTrue(merged["gate"]["passed"])
+
+    def test_reconcile_unresolved_returns_3(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._case(td); (case / "_md").mkdir()
+            (case / "_md" / "a.md").write_text("x", encoding="utf-8")
+            with mock.patch.object(ingest.shutil, "which", return_value="mk"), \
+                 mock.patch.object(ingest, "_run_init_case"), \
+                 mock.patch.object(ingest, "_run_convert", return_value=({"succeeded": 1, "failed": 0}, 0)), \
+                 mock.patch.object(ingest, "_run_index", return_value=({"files_indexed": 1, "files_skipped": 0}, True)), \
+                 mock.patch.object(ingest, "_run_reconcile", return_value=["[未处置源级遗漏] 原始资料/x.doc"]):
+                rc = ingest.main([str(case), "--ocr-engine", "local"])
+            self.assertEqual(rc, ingest.EXIT_INCOMPLETE)
+
+    def test_skip_index_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._case(td); (case / "_md").mkdir()
+            (case / "_md" / "a.md").write_text("x", encoding="utf-8")
+            with mock.patch.object(ingest.shutil, "which", return_value="mk"), \
+                 mock.patch.object(ingest, "_run_init_case"), \
+                 mock.patch.object(ingest, "_run_convert", return_value=({"succeeded": 1, "failed": 0}, 0)), \
+                 mock.patch.object(ingest, "_run_reconcile", return_value=[]), \
+                 mock.patch.object(ingest, "_run_index") as mi:
+                rc = ingest.main([str(case), "--ocr-engine", "local", "--skip-index"])
+            mi.assert_not_called()
+            self.assertEqual(rc, ingest.EXIT_PASS)
+            merged = json.loads((case / "ingest-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(merged["stages"]["index"], {"ran": False, "md_files": 1})
+
+    def test_dry_run_returns_0_no_report(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._case(td)
+            with mock.patch.object(ingest.shutil, "which", return_value="mk"), \
+                 mock.patch.object(ingest.subprocess, "run") as m:
+                rc = ingest.main([str(case), "--dry-run"])
+            m.assert_not_called()
+            self.assertEqual(rc, ingest.EXIT_PASS)
+            self.assertFalse((case / "ingest-report.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
