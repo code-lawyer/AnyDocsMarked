@@ -208,10 +208,30 @@ class IngestApp(tk.Tk):
             pass
         self.after(150, self._pump)
 
-    # 占位，Task 4 实现
     def _build_done_screen(self, exit_code: int) -> None:
         self._clear()
-        tk.Label(self._container, text=f"（完成屏占位 exit={exit_code}——Task 4 实现）").pack()
+        report_path = (self.case_dir / "ingest-report.json") if self.case_dir else None
+        summary = f"引擎退出码 {exit_code}，但未找到 ingest-report.json（可能前置失败）。"
+        if report_path and report_path.is_file():
+            try:
+                summary = summarize_report(json.loads(report_path.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                pass
+        tk.Label(self._container, text="摄入结束", font=("", 13, "bold")).pack(anchor="w")
+        box = tk.Text(self._container, height=16, wrap="word")
+        box.insert("1.0", summary); box.config(state="disabled")
+        box.pack(fill="both", expand=True, pady=8)
+        row = tk.Frame(self._container); row.pack(fill="x")
+        if report_path and report_path.is_file():
+            tk.Button(row, text="打开报告位置",
+                      command=lambda: webbrowser.open(report_path.parent.as_uri())).pack(side="left")
+        tk.Button(row, text="重新摄入", command=self._build_choice_screen).pack(side="left", padx=6)
+        tk.Button(row, text="关闭", command=self.destroy).pack(side="right")
+        if exit_code != 0:
+            messagebox.showwarning("完整性提醒",
+                                   "有需要处理的项，详见窗口内摘要（未静默放过）。")
+        else:
+            messagebox.showinfo("完成", "摄入完成、完整性门通过。可让 agent 继续建 wiki。")
 
 
 def main() -> int:
