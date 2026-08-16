@@ -134,6 +134,17 @@ class RunnerTests(unittest.TestCase):
             result, ran = ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
         self.assertTrue(ran); self.assertEqual(result["files_indexed"], 3)
 
+    def test_index_excludes_report_json_and_carries_quality_metadata(self):
+        # 与 rag.py index_case() 对齐：report.json 非源文不进 RAG，quality 元数据须透传。
+        with mock.patch.object(ingest.subprocess, "run",
+                               return_value=_FakeProc(0, stdout='{"files_indexed":1,"files_skipped":0}')) as m:
+            ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
+        argv = m.call_args.args[0]
+        self.assertIn("--exclude", argv)
+        self.assertIn("report.json", argv)
+        self.assertIn("--metadata-fields", argv)
+        self.assertIn(ingest._METADATA_FIELDS, argv)
+
     def test_index_not_installed_degrades(self):
         with mock.patch.object(ingest.subprocess, "run", side_effect=FileNotFoundError()):
             result, ran = ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
@@ -246,6 +257,46 @@ class MainTests(unittest.TestCase):
             m.assert_not_called()
             self.assertEqual(rc, ingest.EXIT_PASS)
             self.assertFalse((case / "ingest-report.json").exists())
+
+
+class ReconcileIntegrationTests(unittest.TestCase):
+    """真实调用 _run_reconcile（不 mock）——实打实跑 skill/lawiki/tools/reconcile.py，
+    验证 stdout 解析这条缝真的被走到（其余 MainTests 全 mock 掉了这条路径）。"""
+
+    def _build_case(self, td):
+        case = Path(td) / "case"
+        raw = case / "原始资料"; raw.mkdir(parents=True)
+        (raw / "good.txt").write_text("甲方向乙方借款五万元。", encoding="utf-8")
+        (raw / "老合同.doc").write_text("legacy placeholder", encoding="utf-8")
+        md = case / "_md"; md.mkdir()
+        report = {
+            "succeeded": 1, "warned": 0, "failed": 0,
+            "skipped_existing": 0, "skipped_unsupported": 1,
+            "failures": [],
+            "skipped": [{"file": "老合同.doc", "reason": "needs LibreOffice"}],
+        }
+        (md / "report.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+        (case / "wiki").mkdir()
+        return case
+
+    def test_unresolved_skip_surfaces_in_reasons(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._build_case(td)
+            (case / "wiki" / "log.md").write_text("# 操作日志\n", encoding="utf-8")
+            reasons = ingest._run_reconcile(case, dry_run=False)
+        self.assertTrue(reasons)
+        self.assertTrue(any("老合同.doc" in r for r in reasons))
+        self.assertFalse(any(r.startswith("源级对账") for r in reasons))
+
+    def test_registered_skip_resolves_to_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._build_case(td)
+            log = ("# 操作日志\n\n"
+                   "## [2026-08-16] skip | 原始资料/老合同.doc\n"
+                   "- 原因：needs LibreOffice\n")
+            (case / "wiki" / "log.md").write_text(log, encoding="utf-8")
+            reasons = ingest._run_reconcile(case, dry_run=False)
+        self.assertEqual(reasons, [])
 
 
 if __name__ == "__main__":

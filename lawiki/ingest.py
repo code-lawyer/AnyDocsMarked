@@ -29,7 +29,7 @@ from pathlib import Path
 
 _TOOLS = Path(__file__).resolve().parent / "skill" / "lawiki" / "tools"
 sys.path.insert(0, str(_TOOLS))
-from rag import _rag_base as _rag_cmd  # noqa: E402
+from rag import _rag_base as _rag_cmd, _METADATA_FIELDS  # noqa: E402
 
 EXIT_PASS = 0
 EXIT_CONVERT_FAILED = 1
@@ -141,7 +141,8 @@ def _run_convert(raw_dir: Path, md_dir: Path, *, ocr_engine: str, cloud_consent:
 def _run_index(md_dir: Path, case_dir: Path, rag_dir: Path, *,
                dry_run: bool) -> tuple[dict | None, bool]:
     cmd = [*_rag_cmd(), "--data-dir", rag_dir.as_posix(), "index", md_dir.as_posix(),
-           "--source-root", case_dir.as_posix()]
+           "--source-root", case_dir.as_posix(),
+           "--metadata-fields", _METADATA_FIELDS, "--exclude", "report.json"]
     _say("将执行: " + " ".join(cmd))
     if dry_run:
         return None, True

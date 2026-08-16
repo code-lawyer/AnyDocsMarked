@@ -21,7 +21,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Lawiki tests
         working-directory: lawiki
-        run: uv run --python 3.12 --with pytest --with pytest-cov python -m pytest skill/lawiki scripts test_install.py -q --cov=skill/lawiki/lint --cov=skill/lawiki/tools --cov-config=../.coveragerc --cov-fail-under=80
+        run: uv run --python 3.12 --with pytest --with pytest-cov python -m pytest skill/lawiki scripts test_install.py test_ingest.py -q --cov=skill/lawiki/lint --cov=skill/lawiki/tools --cov-config=../.coveragerc --cov-fail-under=80
       - name: Makeitdown tests
         working-directory: makeitdown
         run: uv run --python 3.12 --extra dev --with pytest-cov python -m pytest tests -q --cov=makeitdown --cov-config=../.coveragerc --cov-fail-under=80
