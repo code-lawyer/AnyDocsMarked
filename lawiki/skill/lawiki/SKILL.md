@@ -23,6 +23,8 @@ description: Use when building, maintaining, OR answering questions about a Chin
                                   └── index ──▶ .rag/   （确定性脚本，可选）
 ```
 
+`_md`/`.rag` 由第一步的摄入引擎产出。
+
 三层结构（前两层不可变，你只写第三层）：
 - `原始资料/`：用户丢入的原件，真相之源，**永不修改**。
 - `_md/`：makeitdown 转换产物，来源层，**永不修改**。
@@ -33,35 +35,29 @@ description: Use when building, maintaining, OR answering questions about a Chin
 
 第一次在某机器上用、或缺 Python/makeitdown 时，照 **`references/setup.md`** 走：检测环境 → 让用户选 OCR 方式（本地/云端，附优缺点对比与 token 申请网址）→ 安装（并明确告诉用户"正在安装环境…"）→ 告知激活语。环境就绪可跳过本步。
 
-## 第一步：确保案件结构存在
+## 第一步：跑摄入（一步到位，两种入口）
 
-**跑确定性建案脚手架**（别手写——手写会被跳过，问题报告 §10 里 `AGENTS.md`/`CLAUDE.md` 就一直没被建）：
+前半段（建案脚手架 + 闭世界锚点 → makeitdown 转换 → RAG 建索引 → 源级对账 →
+确定性完整性门）已收敛为**一个引擎、两个前端**，你按场景二选一：
 
-```
-python <SKILL_DIR>/tools/init_case.py <案件根目录>
-```
+- **交用户自助（推荐给非技术用户）**：启动 GUI 让用户自己选本地/云端、（云端）贴
+  token、看进度条、拿完成提示——
+  `python <SKILL_DIR>/../../ingest_gui.py`（即 bundle 根的 `ingest_gui.py`）。
+  告诉用户「窗口里跟着做，完成后回来叫我继续」。
+- **无头自动（headless / 你直接驱动）**：
+  `python <SKILL_DIR>/../../ingest.py <案件根目录> [--ocr-engine auto|local|cloud] [--cloud-consent]`
 
-它幂等地建固定结构（`wiki/` + `案件主体/法律关系/法律事实/时间线` 四子目录 + `index.md` + `log.md` + `原始资料/`），并**盖章写入闭世界锚点 `AGENTS.md` + 同内容 `CLAUDE.md`**（自描述 + "只用本案数据、答前必检索"约束——harness 自动加载本文件、**即便 skill 未触发也在场**，是唯一不依赖触发的护栏）。已存在的文件不覆盖；被掏空需复原时加 `--force`。
+**恢复信号（两种入口相同）**：以 `<案件根目录>/ingest-report.json` 出现 + 进程退出码
+为完成信号。退出码：`0` 全通过；`1` 转换有硬失败；`2` 前置/环境缺失（无原始资料 /
+未装 makeitdown / 选云端未同意）；`3` 完整性门未过（源级未处置>0 或索引不全）。
+**非 0 时读 report 的 `gate.reasons` 向用户如实汇报**，别跳过：失败/跳过的文件不要
+凭空补内容，按缺失处理——补装转换器重跑，或在 `wiki/log.md` 登记 skip（`原始资料/<相对
+路径>` + 非空原因，格式见 `page-formats.md`）并显式告知用户。索引未建（未装 rag）不阻塞，
+问答退化仅 wiki。
 
-**这两个锚点由闸门守**：`lint check` 把案件根缺 `AGENTS.md`/`CLAUDE.md`（或被掏空）判为**硬违规**，故它们并入"ingest 完成 = lint 0 违规"。模板内容见 `references/page-formats.md`。
-
-## 第二步：转换（调 makeitdown）
-
-在案件目录执行 `makeitdown 原始资料 -o _md`。新产物 frontmatter 带 `provenance_version: 1`、`source_sha256` 与 `content_sha256`，后续 lint 会 fail-closed 核对原件和转换正文是否变化；旧产物可读但必须重转后才能宣称 ingest 完成。转换后读 `_md/report.json`，留意 `warned`/`failed`/`skipped`。失败或跳过的文件**不要凭空补内容**，按缺失处理并告知用户。
-
-转换后**跑源级对账（确定性收尾）**：`python <SKILL_DIR>/tools/reconcile.py <案件根目录>`。它把 `原始资料/` 与 `_md/report.json` 对齐，把"转换失败 / 跳过、从未进入 `_md/`"的源文件（**lint 覆盖率账本看不见的盲点**，如无 LibreOffice 的 `.doc`）逼出来。退出码非 0 = 有**未处置源级遗漏**：要么装好外部转换器补转，要么在 `wiki/log.md` 登记 skip（路径写 `原始资料/<相对路径>` + 非空原因，格式同 `_md` 级 skip，见 `page-formats.md`）并**显式告知用户**；清零方可继续。
-
-**长任务模式（批量含扫描件 / 走云端 OCR）**：文件多于 ~20 个或含大量扫描件时，转换可能几十分钟。makeitdown 会逐文件把进度打到 stderr（`[k/N] ✓/⚠/✗ 路径`）。**后台运行并落日志**，期间可 tail 日志按进度向用户播报；**以进程退出 + `_md/report.json` 出现为完成信号**，完成后读 report.json 汇总。中断或掉线后加 `--skip-existing` 重跑；它会同时核对 mtime 与原件 SHA-256，不会因复制时间戳而静默跳过已变化原件。
-
-## 第二步半：索引 `_md/` → `.rag/`（确定性，可选可降级）
-
-装了 rag-retriever 就建索引，支撑后续交叉验证问答：
-
-```
-python <SKILL_DIR>/tools/rag.py index <案件根目录>
-```
-
-确定性、跑命令即可，无需判断。新增来源后重跑同一条命令增量刷新。没装 / 装不上**不阻塞核心**——问答会退化「仅 wiki」。细节与降级见 `rag.md`，首次安装见 `setup.md`。
+> 引擎已幂等跑 `init_case`（脚手架 + `AGENTS.md`/`CLAUDE.md` 闭世界锚点）、`makeitdown`、
+> `rag index`、`reconcile`，你无需再逐个手调这些脚本。边界止于 `_md` + `.rag`：把散文
+> 变成带锚点的 wiki 是下面第三步的 LLM 工作，**不在引擎内**。
 
 ## 第三步：ingest（逐个来源归档进 wiki）
 
