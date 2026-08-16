@@ -165,3 +165,21 @@ RAG 同理可降级：没装 rag-retriever / 没建索引 / 模型不一致时�
 
 > 把法律文件放进案件目录的 `原始资料/`，然后对我说下面任一句即可启动：
 > 「**整理案件资料**」「**把案件资料建成 wiki**」「**建案件库 / 建案件 wiki**」「**处理这个案子**」「**ingest case files**」「**build a case wiki**」。
+
+## 一步摄入（CLI；GUI 见下节，Plan B 落地后补）
+
+把待转文件放进 `<案件目录>/原始资料/`，跑一条：
+
+    python ingest.py <案件目录> [--ocr-engine auto|local|cloud] [--cloud-consent] [--skip-index]
+
+它幂等建案脚手架 → makeitdown 转换 → rag 建索引 → 源级对账 → 完整性核对，产出
+`<案件目录>/ingest-report.json`，并以**单退出码**给出机器可读结论：
+
+- `0` 全通过；`1` 转换有硬失败；`2` 前置/环境缺失（无原始资料 / 未装 makeitdown /
+  选云端但未加 `--cloud-consent`）；`3` 完整性门未过（源级未处置>0，或装了 rag 却索引不全）。
+
+默认 `--ocr-engine auto`（有本地用本地、仅在已配 token+consent 时用云、否则绝不静默上传）。
+未装 rag-retriever 时自动跳过建索引、不算失败（问答退化仅 wiki）。
+
+边界：本步**止于 `_md` + `.rag`**。把散文变成带锚点的 wiki 是 LLM 环节，由 agent 加载
+lawiki 后驱动，**不在引擎内**；wiki 的 `lint check` 也在建 wiki 之后才跑。
