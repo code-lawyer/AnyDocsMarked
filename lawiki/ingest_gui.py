@@ -154,10 +154,64 @@ class IngestApp(tk.Tk):
         save_gui_config(self._config_path, {"engine": self.engine.get()})
         self._build_run_screen()  # 下一任务实现
 
-    # 占位，Task 3 实现
     def _build_run_screen(self) -> None:
         self._clear()
-        tk.Label(self._container, text="（运行屏占位——Task 3 实现）").pack()
+        tk.Label(self._container, text="正在摄入…（可后台运行，勿关窗）",
+                 font=("", 12, "bold")).pack(anchor="w")
+        self._bar = ttk.Progressbar(self._container, mode="determinate", maximum=1)
+        self._bar.pack(fill="x", pady=8)
+        self._stat = tk.Label(self._container, text="启动中…", fg="#333")
+        self._stat.pack(anchor="w")
+        self._logbox = tk.Text(self._container, height=16, wrap="none")
+        self._logbox.pack(fill="both", expand=True, pady=8)
+        t = threading.Thread(target=self._worker, daemon=True)
+        t.start()
+        self.after(150, self._pump)
+
+    def _worker(self) -> None:
+        # 与 agent 完全相同的 CLI；token 只经子进程环境变量注入，不落盘。
+        ingest_py = Path(__file__).resolve().parent / "ingest.py"
+        argv = [sys.executable, str(ingest_py), str(self.case_dir),
+                *resolve_engine_argv(self.engine.get(), self.consent.get())]
+        env = dict(**__import__("os").environ)
+        if self.token_var.get().strip():
+            env["PADDLEOCR_AISTUDIO_TOKEN"] = self.token_var.get().strip()
+        try:
+            proc = subprocess.Popen(
+                argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1, env=env)
+        except Exception as e:  # noqa: BLE001
+            self._q.put(("error", str(e))); return
+        self._proc = proc
+        for line in proc.stdout:  # type: ignore[union-attr]
+            self._q.put(("line", line.rstrip("\n")))
+        proc.wait()
+        self._q.put(("done", proc.returncode))
+
+    def _pump(self) -> None:
+        try:
+            while True:
+                kind, payload = self._q.get_nowait()
+                if kind == "line":
+                    self._logbox.insert("end", payload + "\n")
+                    self._logbox.see("end")
+                    prog = parse_progress_line(payload)
+                    if prog:
+                        self._bar.config(maximum=prog["total"], value=prog["done"])
+                        self._stat.config(text=f"{prog['done']}/{prog['total']} · {prog['path']}")
+                elif kind == "error":
+                    messagebox.showerror("启动失败", payload)
+                    self._build_choice_screen(); return
+                elif kind == "done":
+                    self._build_done_screen(payload); return
+        except queue.Empty:
+            pass
+        self.after(150, self._pump)
+
+    # 占位，Task 4 实现
+    def _build_done_screen(self, exit_code: int) -> None:
+        self._clear()
+        tk.Label(self._container, text=f"（完成屏占位 exit={exit_code}——Task 4 实现）").pack()
 
 
 def main() -> int:
