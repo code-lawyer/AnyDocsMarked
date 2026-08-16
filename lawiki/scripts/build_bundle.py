@@ -141,6 +141,42 @@ def _git_head(repo: Path) -> str:
         return "(无 git)"
 
 
+def _assemble_bundle_root(root: Path, version: str, offline: bool) -> None:
+    """把发布包内容组装进 root（main() 打包前调用；也供测试直接断言目录内容）。"""
+    # 1) skill
+    _copy_tree(LAWIKI / "skill" / "lawiki", root / "skill" / "lawiki", offline)
+    # 2) vendor 两个可安装包（skill 单独放在上面）
+    _copy_tree(RAG_SRC, root / "vendor" / "rag-retriever", offline)
+    _copy_tree(MD_SRC, root / "vendor" / "makeitdown", offline)
+
+    # 3) 安装器 + 一步摄入脚本（CLI + GUI 共用同一引擎，agent 与桌面用户都要能跑）
+    shutil.copy2(LAWIKI / "install.py", root / "install.py")
+    shutil.copy2(LAWIKI / "ingest.py", root / "ingest.py")
+    shutil.copy2(LAWIKI / "ingest_gui.py", root / "ingest_gui.py")
+
+    # 4) MANIFEST（溯源各模块的 commit）
+    (root / "MANIFEST.txt").write_text(
+        f"anydocsmarked v{version}\n"
+        f"lawiki        {_git_head(LAWIKI)}\n"
+        f"rag-retriever {_git_head(RAG_SRC)}\n"
+        f"makeitdown    {_git_head(MD_SRC)}\n",
+        encoding="utf-8")
+
+    # 5) README
+    (root / "README.txt").write_text(
+        "AnyDocsMarked —— 法律案件资料整理 + 交叉验证问答\n\n"
+        "用法：\n"
+        "1. 解压本包。\n"
+        "2. 让你的 AI agent 加载 skill/lawiki（Claude Code/Copilot 自动识别 SKILL.md；\n"
+        "   Codex 等把 skill/lawiki 内容作系统指令或置入案件目录作 AGENTS.md）。\n"
+        "3. 首次使用：运行 `python install.py`（agent 会按 setup.md 自动跑）安装\n"
+        "   makeitdown 与 rag-retriever；按提示选 OCR 方式。\n"
+        "4. 把法律文件放进案件目录的 原始资料/，对 agent 说「整理案件资料」。\n"
+        "5. 之后可就案件提问，agent 会用 wiki 与 RAG 原文交叉验证作答。\n\n"
+        "vendor/ 下为 rag-retriever、makeitdown 源码（含各自 LICENSE）。\n",
+        encoding="utf-8")
+
+
 def main(argv: list[str]) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")  # Windows 控制台默认 GBK
@@ -174,36 +210,7 @@ def main(argv: list[str]) -> int:
         root = Path(tmp) / f"anydocsmarked-v{args.version}"
         root.mkdir()
 
-        # 1) skill
-        _copy_tree(LAWIKI / "skill" / "lawiki", root / "skill" / "lawiki", args.offline)
-        # 2) vendor 两个可安装包（skill 单独放在上面）
-        _copy_tree(RAG_SRC, root / "vendor" / "rag-retriever", args.offline)
-        _copy_tree(MD_SRC, root / "vendor" / "makeitdown", args.offline)
-
-        # 3) 安装器
-        shutil.copy2(LAWIKI / "install.py", root / "install.py")
-
-        # 4) MANIFEST（溯源各模块的 commit）
-        (root / "MANIFEST.txt").write_text(
-            f"anydocsmarked v{args.version}\n"
-            f"lawiki        {_git_head(LAWIKI)}\n"
-            f"rag-retriever {_git_head(RAG_SRC)}\n"
-            f"makeitdown    {_git_head(MD_SRC)}\n",
-            encoding="utf-8")
-
-        # 5) README
-        (root / "README.txt").write_text(
-            "AnyDocsMarked —— 法律案件资料整理 + 交叉验证问答\n\n"
-            "用法：\n"
-            "1. 解压本包。\n"
-            "2. 让你的 AI agent 加载 skill/lawiki（Claude Code/Copilot 自动识别 SKILL.md；\n"
-            "   Codex 等把 skill/lawiki 内容作系统指令或置入案件目录作 AGENTS.md）。\n"
-            "3. 首次使用：运行 `python install.py`（agent 会按 setup.md 自动跑）安装\n"
-            "   makeitdown 与 rag-retriever；按提示选 OCR 方式。\n"
-            "4. 把法律文件放进案件目录的 原始资料/，对 agent 说「整理案件资料」。\n"
-            "5. 之后可就案件提问，agent 会用 wiki 与 RAG 原文交叉验证作答。\n\n"
-            "vendor/ 下为 rag-retriever、makeitdown 源码（含各自 LICENSE）。\n",
-            encoding="utf-8")
+        _assemble_bundle_root(root, args.version, args.offline)
 
         # 打包
         if out_zip.exists():

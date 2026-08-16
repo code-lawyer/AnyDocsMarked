@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import subprocess
@@ -96,6 +97,7 @@ class IngestApp(tk.Tk):
         self.consent = tk.BooleanVar(value=False)
         self.token_var = tk.StringVar(value="")
         self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
         self._q: queue.Queue = queue.Queue()
         self._container = tk.Frame(self)
         self._container.pack(fill="both", expand=True, padx=16, pady=16)
@@ -164,18 +166,27 @@ class IngestApp(tk.Tk):
         self._stat.pack(anchor="w")
         self._logbox = tk.Text(self._container, height=16, wrap="none")
         self._logbox.pack(fill="both", expand=True, pady=8)
-        t = threading.Thread(target=self._worker, daemon=True)
-        t.start()
+        # tk.Variable.get() 走 Tcl，只能在主线程调用；在此（主线程）快照成普通
+        # Python 值再传给 worker 线程，worker 线程自身绝不碰 self.*.get()。
+        engine = self.engine.get()
+        consent = self.consent.get()
+        token = self.token_var.get().strip()
+        self._thread = threading.Thread(target=self._worker, args=(engine, consent, token), daemon=True)
+        self._thread.start()
         self.after(150, self._pump)
 
-    def _worker(self) -> None:
+    def _worker(self, engine: str, consent: bool, token: str) -> None:
         # 与 agent 完全相同的 CLI；token 只经子进程环境变量注入，不落盘。
         ingest_py = Path(__file__).resolve().parent / "ingest.py"
         argv = [sys.executable, str(ingest_py), str(self.case_dir),
-                *resolve_engine_argv(self.engine.get(), self.consent.get())]
-        env = dict(**__import__("os").environ)
-        if self.token_var.get().strip():
-            env["PADDLEOCR_AISTUDIO_TOKEN"] = self.token_var.get().strip()
+                *resolve_engine_argv(engine, consent)]
+        env = os.environ.copy()
+        # makeitdown 等子进程把进度符号（✓⚠✗=→）写到 stderr；GUI 按 UTF-8 解码
+        # 管道，子进程若落到本地 GBK locale 会乱码甚至 UnicodeEncodeError，逼它
+        # 全程 UTF-8 才能对齐。
+        env.setdefault("PYTHONUTF8", "1")
+        if token:
+            env["PADDLEOCR_AISTUDIO_TOKEN"] = token
         try:
             proc = subprocess.Popen(
                 argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -206,6 +217,12 @@ class IngestApp(tk.Tk):
                     self._build_done_screen(payload); return
         except queue.Empty:
             pass
+        # 兜底：worker 线程已经退出，但既没排进消息也没到终态（done/error）——
+        # 说明线程内部异常静默退出（例如读 proc.stdout 时抛错）。不能继续无限
+        # 重排 _pump，否则界面永远卡在"启动中…"。
+        if self._thread is not None and not self._thread.is_alive() and self._q.empty():
+            messagebox.showerror("摄入异常终止", "摄入线程意外退出，未产生结果，请重试。")
+            self._build_choice_screen(); return
         self.after(150, self._pump)
 
     def _build_done_screen(self, exit_code: int) -> None:

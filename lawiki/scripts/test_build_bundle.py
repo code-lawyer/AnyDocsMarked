@@ -73,6 +73,22 @@ class VendoredCheckTests(unittest.TestCase):
             self.assertTrue(build_bundle._has_vendored_models(Path(d)))
 
 
+class BundleRootContentsTests(unittest.TestCase):
+    def test_ingest_scripts_present_at_bundle_root(self):
+        # Regression guard: SKILL.md instructs agents/desktop users to run
+        # `<bundle-root>/ingest.py` and `<bundle-root>/ingest_gui.py`; both
+        # must actually land at the bundle root, not just skill/lawiki/.
+        version = build_bundle.VERSION_FILE.read_text(encoding="utf-8").strip()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / f"anydocsmarked-v{version}"
+            root.mkdir()
+            build_bundle._assemble_bundle_root(root, version, offline=False)
+            self.assertTrue((root / "install.py").is_file())
+            self.assertTrue((root / "ingest.py").is_file())
+            self.assertTrue((root / "ingest_gui.py").is_file())
+            self.assertTrue((root / "skill" / "lawiki").is_dir())
+
+
 class ChecksumTests(unittest.TestCase):
     def test_checksum_manifest_covers_all_bundles(self):
         with tempfile.TemporaryDirectory() as d:
