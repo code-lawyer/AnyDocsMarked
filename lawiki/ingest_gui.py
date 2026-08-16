@@ -12,10 +12,11 @@ import queue
 import re
 import subprocess
 import sys
+import threading
 import tkinter as tk
 import webbrowser
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 _PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]\s+(.)\s+(.*)$")
 _GLYPH_STATUS = {"✓": "succeeded", "⚠": "warned", "✗": "failed",
