@@ -45,6 +45,16 @@ def _count_md_files(md_dir: Path) -> int:
     return sum(1 for _ in md_dir.rglob("*.md"))
 
 
+def _preflight(raw_dir: Path) -> str | None:
+    if not raw_dir.is_dir():
+        return f"找不到原始资料目录：{raw_dir}（把待转文件放进 <案件目录>/原始资料/）"
+    if not any(p.is_file() for p in raw_dir.rglob("*")):
+        return f"原始资料目录为空：{raw_dir}"
+    if shutil.which("makeitdown") is None:
+        return "未找到 makeitdown（先跑 install.py 安装转换器，或检查 PATH）"
+    return None
+
+
 def _gate_and_merge(case_dir: Path, convert: dict, index: dict, md_file_count: int,
                     reconcile_reasons: list[str], *, index_ran: bool) -> dict:
     reasons: list[str] = []

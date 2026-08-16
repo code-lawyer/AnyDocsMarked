@@ -63,5 +63,31 @@ class GateAndMergeTests(unittest.TestCase):
         self.assertTrue(merged["gate"]["passed"])
 
 
+class PreflightTests(unittest.TestCase):
+    def test_missing_raw(self):
+        with tempfile.TemporaryDirectory() as td:
+            err = ingest._preflight(Path(td) / "原始资料")
+            self.assertIn("原始资料", err or "")
+
+    def test_empty_raw(self):
+        with tempfile.TemporaryDirectory() as td:
+            raw = Path(td) / "原始资料"; raw.mkdir()
+            self.assertIn("空", ingest._preflight(raw) or "")
+
+    def test_makeitdown_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            raw = Path(td) / "原始资料"; raw.mkdir()
+            (raw / "a.txt").write_text("x", encoding="utf-8")
+            with mock.patch.object(ingest.shutil, "which", return_value=None):
+                self.assertIn("makeitdown", ingest._preflight(raw) or "")
+
+    def test_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            raw = Path(td) / "原始资料"; raw.mkdir()
+            (raw / "a.txt").write_text("x", encoding="utf-8")
+            with mock.patch.object(ingest.shutil, "which", return_value="/bin/makeitdown"):
+                self.assertIsNone(ingest._preflight(raw))
+
+
 if __name__ == "__main__":
     unittest.main()
