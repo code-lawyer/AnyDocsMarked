@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """ingest.py 回归测试（stdlib unittest，零依赖，镜像 test_install.py）。"""
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
