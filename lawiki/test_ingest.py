@@ -283,6 +283,8 @@ class MainSetupTests(unittest.TestCase):
             self.assertEqual(rc, ingest.EXIT_PASS)
             self.assertTrue((case / "原始资料" / "借条.txt").is_file())  # 已归入
             self.assertFalse((case / "借条.txt").exists())
+            merged = json.loads((case / "ingest-report.json").read_text(encoding="utf-8"))
+            self.assertIn("借条.txt", merged["stages"]["setup"]["moved"])
 
     def test_dry_run_does_not_move(self):
         with tempfile.TemporaryDirectory() as td:
@@ -355,15 +357,30 @@ class SetupCaseTests(unittest.TestCase):
             self.assertTrue((case / "原始资料" / "合同" / "采购.pdf").is_file())
             self.assertFalse((case / "借条.txt").exists())
 
-    def test_idempotent_when_raw_exists(self):
+    def test_noop_when_nothing_movable(self):
         with tempfile.TemporaryDirectory() as td:
             case = Path(td)
             raw = case / "原始资料"; raw.mkdir()
             (raw / "已在里面.txt").write_text("x", encoding="utf-8")
-            (case / "新扔的.txt").write_text("y", encoding="utf-8")  # 不该被动
-            self.assertEqual(ingest._setup_case(case), [])
-            self.assertTrue((case / "新扔的.txt").is_file())        # 原地不动
-            self.assertFalse((raw / "新扔的.txt").exists())
+            self.assertEqual(ingest._setup_case(case), [])  # 无散落项 → 幂等
+
+    def test_gathers_remaining_when_raw_exists(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            raw = case / "原始资料"; raw.mkdir()
+            (case / "后补.txt").write_text("y", encoding="utf-8")  # 散落（如上轮部分失败/新增）
+            self.assertEqual(ingest._setup_case(case), ["后补.txt"])
+            self.assertTrue((raw / "后补.txt").is_file())
+            self.assertFalse((case / "后补.txt").exists())
+
+    def test_move_failure_raises_named_runtimeerror(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            (case / "占用.txt").write_text("z", encoding="utf-8")
+            with mock.patch.object(ingest.shutil, "move", side_effect=OSError("locked")):
+                with self.assertRaises(RuntimeError) as ctx:
+                    ingest._setup_case(case)
+            self.assertIn("占用.txt", str(ctx.exception))
 
     def test_reserved_and_hidden_not_moved(self):
         with tempfile.TemporaryDirectory() as td:
@@ -382,7 +399,7 @@ class SetupCaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             case = Path(td)
             self.assertEqual(ingest._setup_case(case), [])
-            self.assertTrue((case / "原始资料").is_dir())
+            self.assertFalse((case / "原始资料").exists())  # 无可移动项 → 不建 原始资料/
 
 
 if __name__ == "__main__":

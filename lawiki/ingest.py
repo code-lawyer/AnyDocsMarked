@@ -66,17 +66,27 @@ def _movable_entries(case_dir: Path) -> list[Path]:
 
 
 def _setup_case(case_dir: Path) -> list[str]:
-    """幂等地保证 <case>/原始资料 装着用户资料。原始资料/ 不存在时：建之，并把每个
-    可移动顶层条目（保留原名/子结构）移入；已存在时：什么都不做（视为已搭建）。
-    返回被移动的名字列表（已搭建时为空）。移动是破坏性操作，故只碰 _movable_entries。"""
-    raw = case_dir / "原始资料"
-    if raw.exists():
-        return []
+    """把 case 根下仍散落的用户资料归入 <case>/原始资料。可恢复且幂等：每次把当前仍在根下
+    的可移动条目（非脚手架、非隐藏）移入 原始资料/（不存在则建），已在里面的同名项不覆盖。
+    没有可移动条目时返回 []（正常再跑即此情形）。移动是破坏性操作，只碰 _movable_entries；
+    单个条目移动失败（如 Windows 文件被占用）抛 RuntimeError 指明是哪个，不静默吞——
+    已移入的保留，关闭占用后再跑即从剩余项续传。"""
     movable = _movable_entries(case_dir)
-    raw.mkdir(parents=True)
+    if not movable:
+        return []
+    raw = case_dir / "原始资料"
+    raw.mkdir(parents=True, exist_ok=True)
     moved: list[str] = []
     for p in movable:
-        shutil.move(str(p), str(raw / p.name))
+        dest = raw / p.name
+        if dest.exists():
+            continue  # 上一轮已移入的同名项，不覆盖
+        try:
+            shutil.move(str(p), str(dest))
+        except OSError as e:
+            raise RuntimeError(
+                f"归入 原始资料/ 失败：{p.name}（{e}）；可能文件被占用，"
+                "关闭后重跑会从剩余文件续传。") from e
         moved.append(p.name)
     return moved
 
@@ -231,14 +241,19 @@ def main(argv: list[str]) -> int:
         _say(f"✗ 找不到目录：{case}")
         return EXIT_PREFLIGHT
 
+    setup_moved: list[str] = []
     if args.dry_run:
         if not raw.exists():
             _say(f"将把 {len(_movable_entries(case))} 项归入 原始资料/（dry-run 不移动）")
     else:
-        moved = _setup_case(case)
-        if moved:
-            head = "、".join(moved[:8]) + ("…" if len(moved) > 8 else "")
-            _say(f"已把 {len(moved)} 项归入 原始资料/：{head}")
+        try:
+            setup_moved = _setup_case(case)
+        except RuntimeError as e:
+            _say("✗ " + str(e))
+            return EXIT_PREFLIGHT
+        if setup_moved:
+            head = "、".join(setup_moved[:8]) + ("…" if len(setup_moved) > 8 else "")
+            _say(f"已把 {len(setup_moved)} 项归入 原始资料/：{head}")
 
     _run_init_case(case, dry_run=args.dry_run)
 
@@ -272,6 +287,7 @@ def main(argv: list[str]) -> int:
 
     merged = _gate_and_merge(case, convert, index, _count_md_files(md),
                              reconcile_reasons, index_ran=index_ran)
+    merged["stages"]["setup"] = {"moved": setup_moved}
     _atomic_write_text(case / "ingest-report.json",
                        json.dumps(merged, ensure_ascii=False, indent=2))
 

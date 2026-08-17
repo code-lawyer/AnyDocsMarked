@@ -151,13 +151,13 @@ class IngestApp(tk.Tk):
     def _refresh_preview(self) -> None:
         if self.case_dir is None:
             self._preview_lbl.config(text=""); return
-        if (self.case_dir / "原始资料").exists():
-            self._preview_lbl.config(text="✓ 已就绪（原始资料/ 已存在，不再移动文件）")
+        try:
+            n = len(ingest._movable_entries(self.case_dir))
+        except OSError:
+            n = 0
+        if n == 0:
+            self._preview_lbl.config(text="✓ 无待归入的散落文件（原始资料/ 已就绪或本就为空）")
         else:
-            try:
-                n = len(ingest._movable_entries(self.case_dir))
-            except OSError:
-                n = 0
             self._preview_lbl.config(
                 text=f"⚠ 将把该文件夹下的 {n} 项归入子目录 原始资料/ 再处理（原件会被移动）。"
                      "若这不是你的案件资料专用文件夹，请重选。")
@@ -174,6 +174,16 @@ class IngestApp(tk.Tk):
             messagebox.showwarning("缺少目录", "请先选择案件目录。"); return
         if self.engine.get() == "cloud" and not self.consent.get():
             messagebox.showwarning("需要同意", "云端会上传文档，请勾选同意，或改用 本地/auto。"); return
+        if self.case_dir is not None and not (self.case_dir / "原始资料").exists():
+            try:
+                n = len(ingest._movable_entries(self.case_dir))
+            except OSError:
+                n = 0
+            if n and not messagebox.askyesno(
+                    "确认归入原始资料",
+                    f"将把\n{self.case_dir}\n下的 {n} 项移动到子目录 原始资料/ 再处理。\n"
+                    "若这不是你的案件资料专用文件夹，请点「否」重选。\n\n确定继续？"):
+                return
         save_gui_config(self._config_path, {"engine": self.engine.get()})
         self._build_run_screen()
 

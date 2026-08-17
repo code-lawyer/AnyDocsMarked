@@ -49,7 +49,9 @@ description: Use when building, maintaining, OR answering questions about a Chin
    ③等它跑完」。**然后等待**——不要自己去跑 `ingest.py`。
 4. **完成信号** = `<路径>/ingest-report.json` 出现 + GUI 进程退出。出现后读它：
    `gate.passed` 为真则进第三步；`gate.reasons` 非空则**如实向用户汇报**需处理项
-   （失败/跳过的文件不要凭空补，按缺失处理）。
+   （失败/跳过的文件不要凭空补，按缺失处理）。（若用户没跑就关了窗口，
+   `ingest-report.json` 不会更新——以它的出现/修改时间晚于你启动 GUI 的时刻为准，
+   否则再问用户）
 5. **无桌面兜底**：若 GUI 以退出码 3 + 「无图形界面」报错退出，说明当前环境无桌面
    ——**如实告诉用户本流程需在其有桌面的电脑上运行**，不要偷偷改用无头方式替他跑。
 
