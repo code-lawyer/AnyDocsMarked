@@ -19,6 +19,8 @@ import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+import ingest
+
 _PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]\s+(.)\s+(.*)$")
 _GLYPH_STATUS = {"✓": "succeeded", "⚠": "warned", "✗": "failed",
                  "=": "skipped_existing", "→": "skipped_unsupported"}
@@ -86,12 +88,12 @@ _TRADEOFF = (
 
 
 class IngestApp(tk.Tk):
-    def __init__(self, config_path: Path | None = None):
+    def __init__(self, config_path: Path | None = None, case_dir: Path | None = None):
         super().__init__()
         self.title("AnyDocsMarked · 案卷摄入")
         self.geometry("640x520")
         self._config_path = config_path or (Path.home() / ".anydocsmarked-gui.json")
-        self.case_dir: Path | None = None
+        self.case_dir: Path | None = Path(case_dir) if case_dir else None
         cfg = load_gui_config(self._config_path)
         self.engine = tk.StringVar(value=cfg["engine"])
         self.consent = tk.BooleanVar(value=False)
@@ -112,9 +114,13 @@ class IngestApp(tk.Tk):
         tk.Label(self._container, text="① 选择案件目录（含 原始资料/）",
                  font=("", 12, "bold")).pack(anchor="w")
         row = tk.Frame(self._container); row.pack(fill="x", pady=6)
-        self._folder_lbl = tk.Label(row, text="（未选择）", fg="gray")
+        self._folder_lbl = tk.Label(row, text=str(self.case_dir) if self.case_dir else "（未选择）",
+                                    fg="black" if self.case_dir else "gray")
         self._folder_lbl.pack(side="left")
         tk.Button(row, text="选择文件夹…", command=self._on_pick_folder).pack(side="right")
+        self._preview_lbl = tk.Label(self._container, text="", fg="#a60", wraplength=580, justify="left")
+        self._preview_lbl.pack(anchor="w")
+        self._refresh_preview()
 
         tk.Label(self._container, text="② OCR 方式", font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
         tk.Message(self._container, text=_TRADEOFF, width=580, fg="#333").pack(anchor="w")
@@ -142,11 +148,26 @@ class IngestApp(tk.Tk):
         tk.Checkbutton(self._cloud_box, text="我已知晓并同意：云端会把文档上传至百度 AI Studio",
                        variable=self.consent).pack(anchor="w", pady=4)
 
+    def _refresh_preview(self) -> None:
+        if self.case_dir is None:
+            self._preview_lbl.config(text=""); return
+        if (self.case_dir / "原始资料").exists():
+            self._preview_lbl.config(text="✓ 已就绪（原始资料/ 已存在，不再移动文件）")
+        else:
+            try:
+                n = len(ingest._movable_entries(self.case_dir))
+            except OSError:
+                n = 0
+            self._preview_lbl.config(
+                text=f"⚠ 将把该文件夹下的 {n} 项归入子目录 原始资料/ 再处理（原件会被移动）。"
+                     "若这不是你的案件资料专用文件夹，请重选。")
+
     def _on_pick_folder(self) -> None:
         d = filedialog.askdirectory()
         if d:
             self.case_dir = Path(d)
             self._folder_lbl.config(text=str(self.case_dir), fg="black")
+            self._refresh_preview()
 
     def _on_start(self) -> None:
         if self.case_dir is None:
@@ -252,12 +273,21 @@ class IngestApp(tk.Tk):
             messagebox.showinfo("完成", "摄入完成、完整性门通过。可让 agent 继续建 wiki。")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    IngestApp().mainloop()
+    argv = sys.argv[1:] if argv is None else argv
+    case_dir = Path(argv[0]).resolve() if argv else None
+    try:
+        app = IngestApp(case_dir=case_dir)
+    except tk.TclError as e:
+        print("[lawiki-ingest-gui] 无法打开图形界面：本流程需在有桌面的用户电脑上运行；"
+              f"当前环境无图形界面（{e}）。请在用户机器上运行，或改用无头 ingest.py（仅限无桌面/CI）。",
+              flush=True)
+        return 3
+    app.mainloop()
     return 0
 
 

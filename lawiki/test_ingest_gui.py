@@ -3,8 +3,10 @@
 import json
 import sys
 import tempfile
+import tkinter
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent))
 import ingest_gui as g  # noqa: E402
@@ -66,6 +68,20 @@ class ConfigTests(unittest.TestCase):
             loaded = g.load_gui_config(p)
             self.assertEqual(loaded["engine"], "cloud")
             self.assertNotIn("token", json.loads(p.read_text(encoding="utf-8")))
+
+
+class MainGuardTests(unittest.TestCase):
+    def test_no_display_hard_fails_with_code_3(self):
+        with mock.patch.object(g, "IngestApp", side_effect=tkinter.TclError("no display name")):
+            rc = g.main([])
+        self.assertEqual(rc, 3)
+
+    def test_success_path_returns_0(self):
+        fake_app = mock.Mock()
+        with mock.patch.object(g, "IngestApp", return_value=fake_app):
+            rc = g.main([])
+        fake_app.mainloop.assert_called_once()
+        self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":
