@@ -29,7 +29,10 @@ from pathlib import Path
 
 _TOOLS = Path(__file__).resolve().parent / "skill" / "lawiki" / "tools"
 sys.path.insert(0, str(_TOOLS))
-from rag import _rag_base as _rag_cmd, _METADATA_FIELDS  # noqa: E402
+# 直接复用 skill/lawiki/tools 的确定性函数（同 install.py 的 within-bundle 复用；
+# 仍是 lawiki→lawiki/skill/lawiki/tools 的同模块调用，不越 CLAUDE.md 禁止的模块边界）。
+from rag import index_case as _index_case  # noqa: E402
+from reconcile import reconcile as _reconcile  # noqa: E402
 
 EXIT_PASS = 0
 EXIT_CONVERT_FAILED = 1
@@ -58,12 +61,10 @@ def _preflight(raw_dir: Path) -> str | None:
 def _gate_and_merge(case_dir: Path, convert: dict, index: dict, md_file_count: int,
                     reconcile_reasons: list[str], *, index_ran: bool) -> dict:
     reasons: list[str] = []
-    exit_code = EXIT_PASS
 
     failed = convert.get("failed", 0)
     if failed > 0:
         reasons.append(f"转换硬失败 {failed} 个（见 _md/report.json 的 failures）")
-        exit_code = EXIT_CONVERT_FAILED
 
     if index_ran:
         indexed = index.get("files_indexed", 0)
@@ -74,15 +75,20 @@ def _gate_and_merge(case_dir: Path, convert: dict, index: dict, md_file_count: i
             reasons.append(f"{skipped} 个文件被检索器跳过、未入索引")
         if indexed < md_file_count:
             reasons.append(f"{md_file_count - indexed} 个 _md 未进入 .rag 索引")
-        if (skipped > 0 or indexed < md_file_count) and exit_code == EXIT_PASS:
-            exit_code = EXIT_INCOMPLETE
+        index_incomplete = skipped > 0 or indexed < md_file_count
     else:
         index_stage = {"ran": False, "md_files": md_file_count}
+        index_incomplete = False
 
-    if reconcile_reasons:
-        reasons.extend(reconcile_reasons)
-        if exit_code == EXIT_PASS:
-            exit_code = EXIT_INCOMPLETE
+    reasons.extend(reconcile_reasons)
+
+    # 转换硬失败优先于完整性；两者皆无则通过。
+    if failed > 0:
+        exit_code = EXIT_CONVERT_FAILED
+    elif index_incomplete or reconcile_reasons:
+        exit_code = EXIT_INCOMPLETE
+    else:
+        exit_code = EXIT_PASS
 
     return {
         "case_dir": str(case_dir),
@@ -138,42 +144,34 @@ def _run_convert(raw_dir: Path, md_dir: Path, *, ocr_engine: str, cloud_consent:
     return None, proc.returncode
 
 
-def _run_index(md_dir: Path, case_dir: Path, rag_dir: Path, *,
-               dry_run: bool) -> tuple[dict | None, bool]:
-    cmd = [*_rag_cmd(), "--data-dir", rag_dir.as_posix(), "index", md_dir.as_posix(),
-           "--source-root", case_dir.as_posix(),
-           "--metadata-fields", _METADATA_FIELDS, "--exclude", "report.json"]
-    _say("将执行: " + " ".join(cmd))
+def _run_index(case_dir: Path, *, dry_run: bool) -> tuple[dict | None, bool]:
+    # 复用 rag.index_case（单一来源：--exclude report.json、--metadata-fields 等约定都在那）。
+    # ok=False 且原因含「未安装」→ 降级(不阻塞)；其它失败 → 记 0/0 让完整性门拦。
+    _say(f"将执行: rag.index_case({case_dir.as_posix()})（建 .rag 索引，排除 report.json）")
     if dry_run:
         return None, True
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace")
-    except FileNotFoundError:
+    result = _index_case(case_dir)
+    if result.get("ok"):
+        return {"files_indexed": result.get("files_indexed", 0),
+                "files_skipped": result.get("files_skipped", 0)}, True
+    reason = result.get("reason", "")
+    if "未安装" in reason:
         _say("⏭ 未安装 rag-retriever，跳过建索引（问答将退化仅 wiki）")
         return None, False
-    if proc.returncode != 0:
-        _say(f"✗ 建索引失败（退出码 {proc.returncode}）：{(proc.stderr or '').strip()[:200]}")
-        return {"files_indexed": 0, "files_skipped": 0}, True
-    try:
-        return json.loads(proc.stdout), True
-    except ValueError:
-        _say("✗ 建索引退出 0 但输出非 JSON，视为未完成")
-        return {"files_indexed": 0, "files_skipped": 0}, True
+    _say(f"✗ 建索引失败：{reason}")
+    return {"files_indexed": 0, "files_skipped": 0}, True
 
 
 def _run_reconcile(case_dir: Path, *, dry_run: bool) -> list[str]:
-    cmd = [sys.executable, (_TOOLS / "reconcile.py").as_posix(), case_dir.as_posix()]
-    _say("将执行: " + " ".join(cmd))
+    # 直接调 reconcile 的纯函数（它就是为复用而写），不再 shell out + 解析 stdout。
+    _say(f"将执行: 源级对账 reconcile({case_dir.as_posix()})")
     if dry_run:
         return []
-    proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
-    if proc.returncode == 0:
-        return []
-    reasons = [ln for ln in proc.stdout.splitlines()
-               if ln.strip() and not ln.startswith("源级对账")]
-    return reasons or [f"源级对账未通过（退出码 {proc.returncode}）：{(proc.stderr or '').strip()[:200]}"]
+    try:
+        unresolved, _ = _reconcile(case_dir)
+    except FileNotFoundError as e:
+        return [str(e)]
+    return unresolved
 
 
 def main(argv: list[str]) -> int:
@@ -194,7 +192,7 @@ def main(argv: list[str]) -> int:
     args = p.parse_args(argv)
 
     case = Path(args.case_dir).resolve()
-    raw, md, rag = case / "原始资料", case / "_md", case / ".rag"
+    raw, md = case / "原始资料", case / "_md"
 
     _run_init_case(case, dry_run=args.dry_run)
 
@@ -208,7 +206,7 @@ def main(argv: list[str]) -> int:
         workers=args.workers, skip_existing=args.skip_existing, dry_run=args.dry_run)
 
     if args.dry_run:
-        _run_index(md, case, rag, dry_run=True)
+        _run_index(case, dry_run=True)
         _run_reconcile(case, dry_run=True)
         _say("（dry-run：未真正执行，未写 ingest-report.json）")
         return EXIT_PASS
@@ -221,7 +219,7 @@ def main(argv: list[str]) -> int:
     if args.skip_index:
         index, index_ran = {}, False
     else:
-        index, index_ran = _run_index(md, case, rag, dry_run=False)
+        index, index_ran = _run_index(case, dry_run=False)
         index = index or {}
 
     reconcile_reasons = _run_reconcile(case, dry_run=False)

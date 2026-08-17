@@ -154,7 +154,7 @@ class IngestApp(tk.Tk):
         if self.engine.get() == "cloud" and not self.consent.get():
             messagebox.showwarning("需要同意", "云端会上传文档，请勾选同意，或改用 本地/auto。"); return
         save_gui_config(self._config_path, {"engine": self.engine.get()})
-        self._build_run_screen()  # 下一任务实现
+        self._build_run_screen()
 
     def _build_run_screen(self) -> None:
         self._clear()

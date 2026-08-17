@@ -128,44 +128,52 @@ class RunnerTests(unittest.TestCase):
             self.assertIsNone(report)
             self.assertEqual(rc, 2)
 
-    def test_index_parses_json(self):
-        with mock.patch.object(ingest.subprocess, "run",
-                               return_value=_FakeProc(0, stdout='{"files_indexed":3,"files_skipped":0}')):
-            result, ran = ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
-        self.assertTrue(ran); self.assertEqual(result["files_indexed"], 3)
-
-    def test_index_excludes_report_json_and_carries_quality_metadata(self):
-        # 与 rag.py index_case() 对齐：report.json 非源文不进 RAG，quality 元数据须透传。
-        with mock.patch.object(ingest.subprocess, "run",
-                               return_value=_FakeProc(0, stdout='{"files_indexed":1,"files_skipped":0}')) as m:
-            ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
-        argv = m.call_args.args[0]
-        self.assertIn("--exclude", argv)
-        self.assertIn("report.json", argv)
-        self.assertIn("--metadata-fields", argv)
-        self.assertIn(ingest._METADATA_FIELDS, argv)
+    # _run_index 现在委托 rag.index_case（单一来源）；这里只锁「index_case 结果 → 阶段元组」
+    # 的映射。--exclude report.json / --metadata-fields 的命令构造由 rag 自己的测试守。
+    def test_index_delegates_and_maps_ok(self):
+        with mock.patch.object(ingest, "_index_case",
+                               return_value={"ok": True, "files_indexed": 3, "files_skipped": 0}) as m:
+            result, ran = ingest._run_index(Path("/x"), dry_run=False)
+        m.assert_called_once_with(Path("/x"))
+        self.assertTrue(ran)
+        self.assertEqual(result, {"files_indexed": 3, "files_skipped": 0})
 
     def test_index_not_installed_degrades(self):
-        with mock.patch.object(ingest.subprocess, "run", side_effect=FileNotFoundError()):
-            result, ran = ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
+        with mock.patch.object(ingest, "_index_case",
+                               return_value={"ok": False, "reason": "未安装 rag-retriever（或不在 PATH）"}):
+            result, ran = ingest._run_index(Path("/x"), dry_run=False)
         self.assertFalse(ran); self.assertIsNone(result)
 
-    def test_index_nonzero_marks_empty(self):
-        with mock.patch.object(ingest.subprocess, "run", return_value=_FakeProc(1, stdout="")):
-            result, ran = ingest._run_index(Path("/x/_md"), Path("/x"), Path("/x/.rag"), dry_run=False)
+    def test_index_other_failure_marks_empty(self):
+        with mock.patch.object(ingest, "_index_case",
+                               return_value={"ok": False, "reason": "退出码 1：boom"}):
+            result, ran = ingest._run_index(Path("/x"), dry_run=False)
         self.assertTrue(ran); self.assertEqual(result, {"files_indexed": 0, "files_skipped": 0})
 
+    def test_index_dry_run_skips_call(self):
+        with mock.patch.object(ingest, "_index_case") as m:
+            result, ran = ingest._run_index(Path("/x"), dry_run=True)
+        m.assert_not_called()
+        self.assertEqual((result, ran), (None, True))
+
+    # _run_reconcile 现在直接调 reconcile 纯函数（reconcile.py 自带纯函数测试）；
+    # 这里锁映射 + 无 report.json 时的兜底。
     def test_reconcile_clean(self):
-        with mock.patch.object(ingest.subprocess, "run",
-                               return_value=_FakeProc(0, stdout="源级对账：2 源文件 | 已产出 2 | 已登记跳过 0 | 未处置 0")):
+        with mock.patch.object(ingest, "_reconcile", return_value=([], {})):
             self.assertEqual(ingest._run_reconcile(Path("/x"), dry_run=False), [])
 
     def test_reconcile_unresolved(self):
-        out = ("源级对账：3 源文件 | 已产出 2 | 已登记跳过 0 | 未处置 1\n"
-               "[未处置源级遗漏] 原始资料/老合同.doc")
-        with mock.patch.object(ingest.subprocess, "run", return_value=_FakeProc(1, stdout=out)):
+        with mock.patch.object(ingest, "_reconcile",
+                               return_value=(["[未处置源级遗漏] 原始资料/老合同.doc"], {})):
             reasons = ingest._run_reconcile(Path("/x"), dry_run=False)
         self.assertEqual(reasons, ["[未处置源级遗漏] 原始资料/老合同.doc"])
+
+    def test_reconcile_missing_report_returns_reason(self):
+        with mock.patch.object(ingest, "_reconcile",
+                               side_effect=FileNotFoundError("找不到 _md/report.json")):
+            reasons = ingest._run_reconcile(Path("/x"), dry_run=False)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("report.json", reasons[0])
 
 
 class MainTests(unittest.TestCase):

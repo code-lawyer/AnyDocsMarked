@@ -222,6 +222,24 @@ class NoticeSurfacingTests(_PatchRagRunMixin, unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("未检测到内置", result["notice"])
 
+    def test_index_case_command_excludes_report_json_and_sets_metadata(self):
+        # makeitdown 的台账 report.json 非源文，绝不能进 RAG；quality 元数据须透传。
+        # 这是「完整性门不被 report.json 混入而误判」的守护，ingest.py 依赖它。
+        case = Path(tempfile.mkdtemp())
+        (case / "_md").mkdir()
+        captured = {}
+
+        def fake_run(cmd, **kw):
+            captured["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, stdout='{"files_indexed": 1}', stderr="")
+
+        self._patch_run(fake_run)
+        rag.index_case(case)
+        self.assertIn("--exclude", captured["cmd"])
+        self.assertIn("report.json", captured["cmd"])
+        self.assertIn("--metadata-fields", captured["cmd"])
+        self.assertIn(rag._METADATA_FIELDS, captured["cmd"])
+
     def test_search_case_surfaces_notice_on_success(self):
         case = Path(tempfile.mkdtemp())
         (case / ".rag").mkdir()
