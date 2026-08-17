@@ -294,6 +294,13 @@ class MainSetupTests(unittest.TestCase):
             self.assertTrue((case / "借条.txt").exists())          # 未移动
             self.assertFalse((case / "原始资料").exists())
 
+    def test_nonexistent_case_rejected_no_dir_created(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td) / "不存在的案子"  # never created
+            rc = ingest.main([str(case)])
+            self.assertEqual(rc, ingest.EXIT_PREFLIGHT)
+            self.assertFalse(case.exists())  # 没有在打错的路径上建目录
+
 
 class ReconcileIntegrationTests(unittest.TestCase):
     """真实调用 _run_reconcile（不 mock）——实打实跑 skill/lawiki/tools/reconcile.py，
