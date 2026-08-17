@@ -267,6 +267,34 @@ class MainTests(unittest.TestCase):
             self.assertFalse((case / "ingest-report.json").exists())
 
 
+class MainSetupTests(unittest.TestCase):
+    def test_main_sets_up_loose_folder_then_runs(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td) / "案子"; case.mkdir()
+            (case / "借条.txt").write_text("甲借乙五万", encoding="utf-8")  # 散落，无 原始资料/
+            (case / "_md").mkdir()
+            (case / "_md" / "借条.md").write_text("x", encoding="utf-8")
+            with mock.patch.object(ingest.shutil, "which", return_value="mk"), \
+                 mock.patch.object(ingest, "_run_init_case"), \
+                 mock.patch.object(ingest, "_run_convert", return_value=({"succeeded": 1, "failed": 0}, 0)), \
+                 mock.patch.object(ingest, "_run_index", return_value=({"files_indexed": 1, "files_skipped": 0}, True)), \
+                 mock.patch.object(ingest, "_run_reconcile", return_value=[]):
+                rc = ingest.main([str(case), "--ocr-engine", "local"])
+            self.assertEqual(rc, ingest.EXIT_PASS)
+            self.assertTrue((case / "原始资料" / "借条.txt").is_file())  # 已归入
+            self.assertFalse((case / "借条.txt").exists())
+
+    def test_dry_run_does_not_move(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td) / "案子"; case.mkdir()
+            (case / "借条.txt").write_text("x", encoding="utf-8")
+            with mock.patch.object(ingest.subprocess, "run"):
+                rc = ingest.main([str(case), "--dry-run"])
+            self.assertEqual(rc, ingest.EXIT_PASS)
+            self.assertTrue((case / "借条.txt").exists())          # 未移动
+            self.assertFalse((case / "原始资料").exists())
+
+
 class ReconcileIntegrationTests(unittest.TestCase):
     """真实调用 _run_reconcile（不 mock）——实打实跑 skill/lawiki/tools/reconcile.py，
     验证 stdout 解析这条缝真的被走到（其余 MainTests 全 mock 掉了这条路径）。"""

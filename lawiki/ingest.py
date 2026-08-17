@@ -58,6 +58,8 @@ _RESERVED_CASE_ENTRIES = frozenset({
 def _movable_entries(case_dir: Path) -> list[Path]:
     """case 根下属于用户资料、可移入 原始资料/ 的顶层条目：既非我们建的脚手架，
     也非隐藏项（.git 等）。按名排序，稳定可测。"""
+    if not case_dir.is_dir():
+        return []
     return sorted(
         (p for p in case_dir.iterdir()
          if p.name not in _RESERVED_CASE_ENTRIES and not p.name.startswith(".")),
@@ -226,6 +228,15 @@ def main(argv: list[str]) -> int:
 
     case = Path(args.case_dir).resolve()
     raw, md = case / "原始资料", case / "_md"
+
+    if args.dry_run:
+        if not (case / "原始资料").exists():
+            _say(f"将把 {len(_movable_entries(case))} 项归入 原始资料/（dry-run 不移动）")
+    else:
+        moved = _setup_case(case)
+        if moved:
+            head = "、".join(moved[:8]) + ("…" if len(moved) > 8 else "")
+            _say(f"已把 {len(moved)} 项归入 原始资料/：{head}")
 
     _run_init_case(case, dry_run=args.dry_run)
 
