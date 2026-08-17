@@ -65,6 +65,12 @@ LOG = """# 操作日志
 """
 
 WIKI_SUBDIRS = ("案件主体", "法律关系", "法律事实", "时间线")
+# case 根下本脚本盖章创建的顶层脚手架（目录 + 锚点文件）。下面的创建逻辑与
+# `ingest._RESERVED_CASE_ENTRIES` 都从这里派生——保证"建了什么"与"归入原始资料时
+# 绝不移动什么"永远同源、不漂移（新增顶层脚手架只需改这里一处）。
+SCAFFOLD_DIRS = ("原始资料", "wiki")
+SCAFFOLD_ANCHORS = ("AGENTS.md", "CLAUDE.md")
+SCAFFOLD_ENTRIES = frozenset(SCAFFOLD_DIRS) | frozenset(SCAFFOLD_ANCHORS)
 
 
 def init_case(root: Path, force: bool = False) -> list[str]:
@@ -85,14 +91,14 @@ def init_case(root: Path, force: bool = False) -> list[str]:
         p.write_text(content, encoding="utf-8")
         created.append(f"写文件 {rel}")
 
-    _ensure_dir(root / "原始资料")
-    _ensure_dir(root / "wiki")
+    for d in SCAFFOLD_DIRS:
+        _ensure_dir(root / d)
     for d in WIKI_SUBDIRS:
         _ensure_dir(root / "wiki" / d)
     _ensure_file("wiki/index.md", INDEX)
     _ensure_file("wiki/log.md", LOG)
-    _ensure_file("AGENTS.md", ANCHOR)
-    _ensure_file("CLAUDE.md", ANCHOR)
+    for f in SCAFFOLD_ANCHORS:
+        _ensure_file(f, ANCHOR)
     return created
 
 

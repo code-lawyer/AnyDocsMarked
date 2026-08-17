@@ -31,6 +31,7 @@ _TOOLS = Path(__file__).resolve().parent / "skill" / "lawiki" / "tools"
 sys.path.insert(0, str(_TOOLS))
 # 直接复用 skill/lawiki/tools 的确定性函数（同 install.py 的 within-bundle 复用；
 # 仍是 lawiki→lawiki/skill/lawiki/tools 的同模块调用，不越 CLAUDE.md 禁止的模块边界）。
+from init_case import SCAFFOLD_ENTRIES  # noqa: E402  (原始资料/wiki/AGENTS.md/CLAUDE.md 的单一来源)
 from rag import index_case as _index_case  # noqa: E402
 from reconcile import reconcile as _reconcile  # noqa: E402
 
@@ -49,9 +50,10 @@ def _count_md_files(md_dir: Path) -> int:
 
 
 # case 根下我们自己搭建的脚手架——_setup_case 归入原始资料时绝不移动这些。
-_RESERVED_CASE_ENTRIES = frozenset({
-    "原始资料", "_md", ".rag", "wiki",
-    "AGENTS.md", "CLAUDE.md", "ingest-report.json", "report.json",
+# init_case 建的顶层项从其单一来源 SCAFFOLD_ENTRIES 派生（防漂移：那边加了脚手架、
+# 这里自动跟上）；再并上引擎/流水线自产的产物（_md 转换产物、.rag 索引、两个台账）。
+_RESERVED_CASE_ENTRIES = SCAFFOLD_ENTRIES | frozenset({
+    "_md", ".rag", "ingest-report.json", "report.json",
 })
 
 
@@ -243,8 +245,11 @@ def main(argv: list[str]) -> int:
 
     setup_moved: list[str] = []
     if args.dry_run:
-        if not raw.exists():
-            _say(f"将把 {len(_movable_entries(case))} 项归入 原始资料/（dry-run 不移动）")
+        # 与 _setup_case 同一判据（有可移动项就归入，不看 原始资料/ 是否已存在）——
+        # 否则已建库后再扔的散落文件在 dry-run 里被漏报、真跑却会移动。
+        n = len(_movable_entries(case))
+        if n:
+            _say(f"将把 {n} 项归入 原始资料/（dry-run 不移动）")
     else:
         try:
             setup_moved = _setup_case(case)

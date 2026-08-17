@@ -148,13 +148,17 @@ class IngestApp(tk.Tk):
         tk.Checkbutton(self._cloud_box, text="我已知晓并同意：云端会把文档上传至百度 AI Studio",
                        variable=self.consent).pack(anchor="w", pady=4)
 
+    def _movable_count(self) -> int:
+        """当前 case_dir 下会被归入 原始资料/ 的散落项数（读盘失败按 0）。预览与确认共用。"""
+        try:
+            return len(ingest._movable_entries(self.case_dir))
+        except OSError:
+            return 0
+
     def _refresh_preview(self) -> None:
         if self.case_dir is None:
             self._preview_lbl.config(text=""); return
-        try:
-            n = len(ingest._movable_entries(self.case_dir))
-        except OSError:
-            n = 0
+        n = self._movable_count()
         if n == 0:
             self._preview_lbl.config(text="✓ 无待归入的散落文件（原始资料/ 已就绪或本就为空）")
         else:
@@ -176,10 +180,7 @@ class IngestApp(tk.Tk):
             messagebox.showwarning("需要同意", "云端会上传文档，请勾选同意，或改用 本地/auto。"); return
         # 只要还有散落待归入项就弹确认（不论 原始资料/ 是否已存在——已建库后再扔的
         # 新文件同样会被移动，同样该让用户确认）。
-        try:
-            n = len(ingest._movable_entries(self.case_dir))
-        except OSError:
-            n = 0
+        n = self._movable_count()
         if n and not messagebox.askyesno(
                 "确认归入原始资料",
                 f"将把\n{self.case_dir}\n下的 {n} 项移动到子目录 原始资料/ 再处理。\n"
