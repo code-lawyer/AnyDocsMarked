@@ -48,6 +48,39 @@ def _count_md_files(md_dir: Path) -> int:
     return sum(1 for _ in md_dir.rglob("*.md"))
 
 
+# case 根下我们自己搭建的脚手架——_setup_case 归入原始资料时绝不移动这些。
+_RESERVED_CASE_ENTRIES = frozenset({
+    "原始资料", "_md", ".rag", "wiki",
+    "AGENTS.md", "CLAUDE.md", "ingest-report.json", "report.json",
+})
+
+
+def _movable_entries(case_dir: Path) -> list[Path]:
+    """case 根下属于用户资料、可移入 原始资料/ 的顶层条目：既非我们建的脚手架，
+    也非隐藏项（.git 等）。按名排序，稳定可测。"""
+    return sorted(
+        (p for p in case_dir.iterdir()
+         if p.name not in _RESERVED_CASE_ENTRIES and not p.name.startswith(".")),
+        key=lambda p: p.name,
+    )
+
+
+def _setup_case(case_dir: Path) -> list[str]:
+    """幂等地保证 <case>/原始资料 装着用户资料。原始资料/ 不存在时：建之，并把每个
+    可移动顶层条目（保留原名/子结构）移入；已存在时：什么都不做（视为已搭建）。
+    返回被移动的名字列表（已搭建时为空）。移动是破坏性操作，故只碰 _movable_entries。"""
+    raw = case_dir / "原始资料"
+    if raw.exists():
+        return []
+    movable = _movable_entries(case_dir)
+    raw.mkdir(parents=True)
+    moved: list[str] = []
+    for p in movable:
+        shutil.move(str(p), str(raw / p.name))
+        moved.append(p.name)
+    return moved
+
+
 def _preflight(raw_dir: Path) -> str | None:
     if not raw_dir.is_dir():
         return f"找不到原始资料目录：{raw_dir}（把待转文件放进 <案件目录>/原始资料/）"

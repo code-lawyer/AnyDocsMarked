@@ -307,5 +307,48 @@ class ReconcileIntegrationTests(unittest.TestCase):
         self.assertEqual(reasons, [])
 
 
+class SetupCaseTests(unittest.TestCase):
+    def test_moves_loose_files_into_raw(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            (case / "借条.txt").write_text("x", encoding="utf-8")
+            sub = case / "合同"; sub.mkdir()
+            (sub / "采购.pdf").write_bytes(b"%PDF")
+            moved = ingest._setup_case(case)
+            self.assertEqual(sorted(moved), ["借条.txt", "合同"])
+            self.assertTrue((case / "原始资料" / "借条.txt").is_file())
+            self.assertTrue((case / "原始资料" / "合同" / "采购.pdf").is_file())
+            self.assertFalse((case / "借条.txt").exists())
+
+    def test_idempotent_when_raw_exists(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            raw = case / "原始资料"; raw.mkdir()
+            (raw / "已在里面.txt").write_text("x", encoding="utf-8")
+            (case / "新扔的.txt").write_text("y", encoding="utf-8")  # 不该被动
+            self.assertEqual(ingest._setup_case(case), [])
+            self.assertTrue((case / "新扔的.txt").is_file())        # 原地不动
+            self.assertFalse((raw / "新扔的.txt").exists())
+
+    def test_reserved_and_hidden_not_moved(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            (case / "料.txt").write_text("x", encoding="utf-8")
+            for name in ("_md", "wiki", ".git"):
+                (case / name).mkdir()
+            (case / "AGENTS.md").write_text("a", encoding="utf-8")
+            moved = ingest._setup_case(case)
+            self.assertEqual(moved, ["料.txt"])
+            for name in ("_md", "wiki", ".git", "AGENTS.md"):
+                self.assertTrue((case / name).exists())            # 保留/隐藏原地
+            self.assertFalse((case / "原始资料" / "_md").exists())
+
+    def test_empty_case_creates_empty_raw(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            self.assertEqual(ingest._setup_case(case), [])
+            self.assertTrue((case / "原始资料").is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()
