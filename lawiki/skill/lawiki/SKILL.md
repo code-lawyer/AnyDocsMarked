@@ -23,7 +23,7 @@ description: Use when building, maintaining, OR answering questions about a Chin
                                   └── index ──▶ .rag/   （确定性脚本，可选）
 ```
 
-`_md`/`.rag` 由第一步的摄入引擎产出。
+`原始资料`（引擎自动归入）/`_md`/`.rag` 由第一步产出。
 
 三层结构（前两层不可变，你只写第三层）：
 - `原始资料/`：用户丢入的原件，真相之源，**永不修改**。
@@ -35,30 +35,29 @@ description: Use when building, maintaining, OR answering questions about a Chin
 
 第一次在某机器上用、或缺 Python/makeitdown 时，照 **`references/setup.md`** 走：检测环境 → 让用户选 OCR 方式（本地/云端，附优缺点对比与 token 申请网址）→ 安装（并明确告诉用户"正在安装环境…"）→ 告知激活语。环境就绪可跳过本步。
 
-## 第一步：跑摄入（一步到位，两种入口）
+## 第一步：跑摄入（弹 GUI 交用户，别自己无头跑）
 
-前半段（建案脚手架 + 闭世界锚点 → makeitdown 转换 → RAG 建索引 → 源级对账 →
-确定性完整性门）已收敛为**一个引擎、两个前端**，你按场景二选一：
+前半段（归入原始资料 + 建案脚手架 + 转换 + 建索引 + 对账 + 完整性门）**只走一条路：
+把 GUI 弹给用户操作**。用户只需给你一个「资料所在路径」，其余你来。
 
-- **交用户自助（推荐给非技术用户）**：启动 GUI 让用户自己选本地/云端、（云端）贴
-  token、看进度条、拿完成提示——
-  `python <SKILL_DIR>/../../ingest_gui.py`（即 bundle 根的 `ingest_gui.py`）。
-  告诉用户「窗口里跟着做，完成后回来叫我继续」。
-- **无头自动（headless / 你直接驱动）**：
-  `python <SKILL_DIR>/../../ingest.py <案件根目录> [--ocr-engine auto|local|cloud] [--cloud-consent]`
+1. **拿到用户给的路径**（该路径下有待处理的散落资料；文件夹叫什么、要不要建
+   `原始资料/`，用户都不用管——引擎会把散落资料自动归入 `原始资料/`）。
+2. **后台启动 GUI**，把该路径传进去（后台，避免被窗口阻塞）：
+   - Claude Code：用 Bash 后台模式跑 `python <SKILL_DIR>/../../ingest_gui.py "<路径>"`；
+   - 其它 agent：等价的 `nohup … &` / detached 方式。
+3. **告诉用户**：「已弹出窗口，请在里面①确认把资料归入原始资料 ②选本地/云端 OCR
+   ③等它跑完」。**然后等待**——不要自己去跑 `ingest.py`。
+4. **完成信号** = `<路径>/ingest-report.json` 出现 + GUI 进程退出。出现后读它：
+   `gate.passed` 为真则进第三步；`gate.reasons` 非空则**如实向用户汇报**需处理项
+   （失败/跳过的文件不要凭空补，按缺失处理）。
+5. **无桌面兜底**：若 GUI 以退出码 3 + 「无图形界面」报错退出，说明当前环境无桌面
+   ——**如实告诉用户本流程需在其有桌面的电脑上运行**，不要偷偷改用无头方式替他跑。
 
-**恢复信号（两种入口相同）**：以 `<案件根目录>/ingest-report.json` 出现 + 进程退出码
-为完成信号。退出码：`0` 全通过；`1` 转换有硬失败；`2` 前置/环境缺失（无原始资料 /
-未装 makeitdown / 选云端未同意）；`3` 完整性门未过（源级未处置>0 或索引不全）。
-**非 0 时读 report 的 `gate.reasons` 向用户如实汇报**，别跳过：失败/跳过的文件不要
-凭空补内容，按缺失处理——补装转换器重跑，或在 `wiki/log.md` 登记 skip（`原始资料/<相对
-路径>` + 非空原因，格式见 `page-formats.md`）并显式告知用户。索引未建（未装 rag）不阻塞，
-问答退化仅 wiki。
-
-> 引擎已幂等跑 `init_case`（脚手架 + `AGENTS.md`/`CLAUDE.md` 闭世界锚点——缺失/被掏空会被
-> 第三步的 `lint check` 判硬违规）、`makeitdown`、`rag index`、`reconcile`，你无需再逐个
-> 手调这些脚本。边界止于 `_md` + `.rag`：把散文
-> 变成带锚点的 wiki 是下面第三步的 LLM 工作，**不在引擎内**。
+> 引擎（GUI 底层调）幂等跑：把散落资料归入 `原始资料/` → `init_case`（脚手架 +
+> `AGENTS.md`/`CLAUDE.md` 闭世界锚点，缺失会被第三步 `lint check` 判硬违规）→
+> `makeitdown` → `rag index` → `reconcile`。边界止于 `_md` + `.rag`：把散文变成带
+> 锚点的 wiki 是第三步的 LLM 工作，不在引擎内。**无头 `ingest.py` 仅为无桌面/CI
+> 兜底，不是给用户的正常路径——正常一律弹 GUI。**
 
 ## 第三步：ingest（逐个来源归档进 wiki）
 
