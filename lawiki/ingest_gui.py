@@ -174,16 +174,17 @@ class IngestApp(tk.Tk):
             messagebox.showwarning("缺少目录", "请先选择案件目录。"); return
         if self.engine.get() == "cloud" and not self.consent.get():
             messagebox.showwarning("需要同意", "云端会上传文档，请勾选同意，或改用 本地/auto。"); return
-        if self.case_dir is not None and not (self.case_dir / "原始资料").exists():
-            try:
-                n = len(ingest._movable_entries(self.case_dir))
-            except OSError:
-                n = 0
-            if n and not messagebox.askyesno(
-                    "确认归入原始资料",
-                    f"将把\n{self.case_dir}\n下的 {n} 项移动到子目录 原始资料/ 再处理。\n"
-                    "若这不是你的案件资料专用文件夹，请点「否」重选。\n\n确定继续？"):
-                return
+        # 只要还有散落待归入项就弹确认（不论 原始资料/ 是否已存在——已建库后再扔的
+        # 新文件同样会被移动，同样该让用户确认）。
+        try:
+            n = len(ingest._movable_entries(self.case_dir))
+        except OSError:
+            n = 0
+        if n and not messagebox.askyesno(
+                "确认归入原始资料",
+                f"将把\n{self.case_dir}\n下的 {n} 项移动到子目录 原始资料/ 再处理。\n"
+                "若这不是你的案件资料专用文件夹，请点「否」重选。\n\n确定继续？"):
+            return
         save_gui_config(self._config_path, {"engine": self.engine.get()})
         self._build_run_screen()
 
