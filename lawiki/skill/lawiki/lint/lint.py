@@ -412,7 +412,7 @@ CASE_ANCHOR_SENTINEL = "答前必先检索"
 
 def _check_case_files(root: Path) -> list[str]:
     """案件根必须有闭世界锚点 `AGENTS.md` 与 `CLAUDE.md`（harness 自动加载、
-    即便 skill 未触发也在场，见 SKILL.md 第一步）。缺失 / 空 / 无 sentinel →
+    即便 skill 未触发也在场，见 SKILL.md 第一步「跑摄入」——引擎跑 init_case 时盖章写入）。缺失 / 空 / 无 sentinel →
     硬违规。生成用 `tools/init_case.py`。不进 scan_case（那只管 wiki 内容），
     由 main 的 check 分支追加。"""
     violations: list[str] = []

@@ -228,12 +228,13 @@ class IngestApp(tk.Tk):
     def _build_done_screen(self, exit_code: int) -> None:
         self._clear()
         report_path = (self.case_dir / "ingest-report.json") if self.case_dir else None
-        summary = f"引擎退出码 {exit_code}，但未找到 ingest-report.json（可能前置失败）。"
         if report_path and report_path.is_file():
             try:
                 summary = summarize_report(json.loads(report_path.read_text(encoding="utf-8")))
             except (OSError, ValueError):
-                pass
+                summary = f"找到 ingest-report.json 但无法解析（可能写入中断）。引擎退出码 {exit_code}。"
+        else:
+            summary = f"引擎退出码 {exit_code}，但未找到 ingest-report.json（可能前置失败）。"
         tk.Label(self._container, text="摄入结束", font=("", 13, "bold")).pack(anchor="w")
         box = tk.Text(self._container, height=16, wrap="word")
         box.insert("1.0", summary); box.config(state="disabled")

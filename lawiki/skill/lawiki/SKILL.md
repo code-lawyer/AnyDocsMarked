@@ -55,8 +55,9 @@ description: Use when building, maintaining, OR answering questions about a Chin
 路径>` + 非空原因，格式见 `page-formats.md`）并显式告知用户。索引未建（未装 rag）不阻塞，
 问答退化仅 wiki。
 
-> 引擎已幂等跑 `init_case`（脚手架 + `AGENTS.md`/`CLAUDE.md` 闭世界锚点）、`makeitdown`、
-> `rag index`、`reconcile`，你无需再逐个手调这些脚本。边界止于 `_md` + `.rag`：把散文
+> 引擎已幂等跑 `init_case`（脚手架 + `AGENTS.md`/`CLAUDE.md` 闭世界锚点——缺失/被掏空会被
+> 第三步的 `lint check` 判硬违规）、`makeitdown`、`rag index`、`reconcile`，你无需再逐个
+> 手调这些脚本。边界止于 `_md` + `.rag`：把散文
 > 变成带锚点的 wiki 是下面第三步的 LLM 工作，**不在引擎内**。
 
 ## 第三步：ingest（逐个来源归档进 wiki）

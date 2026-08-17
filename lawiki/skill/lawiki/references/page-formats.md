@@ -4,7 +4,7 @@ ingest 写页时照此格式。来源锚点、三类标注见 SKILL.md 主干；
 
 ## 脚手架初始内容
 
-新建案件由 **`tools/init_case.py` 确定性生成**（SKILL.md 第一步），不用手写。下面是它盖章写入的模板，供参考/核对；改模板时 `init_case.py` 与本节须同步。生成物：① 案件根 `AGENTS.md` + 同内容 `CLAUDE.md`（闭世界锚点，含约束句「答前必先检索」，`lint check` 会查其在场）；② `wiki/index.md`、`wiki/log.md` 初始内容 + 四个 wiki 子目录 + `原始资料/`。
+新建案件由 **`tools/init_case.py` 确定性生成**（SKILL.md 第一步「跑摄入」的引擎自动运行），不用手写。下面是它盖章写入的模板，供参考/核对；改模板时 `init_case.py` 与本节须同步。生成物：① 案件根 `AGENTS.md` + 同内容 `CLAUDE.md`（闭世界锚点，含约束句「答前必先检索」，`lint check` 会查其在场）；② `wiki/index.md`、`wiki/log.md` 初始内容 + 四个 wiki 子目录 + `原始资料/`。
 
 ### 案件根 `AGENTS.md`（自描述标记）
 
