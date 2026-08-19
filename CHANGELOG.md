@@ -4,6 +4,17 @@
 
 ## Unreleased
 
+### Added
+
+- 摄入引擎 `lawiki/ingest.py`（仅标准库,跨平台):单入口编排 `_setup_case → init_case → makeitdown 转换 → rag 建索引 → 源级对账 → 确定性完整性门`,产出合并 `ingest-report.json` + 单退出码(0 全通过 / 1 转换硬失败 / 2 前置或环境缺失 / 3 完整性门未过)。门/退出码/consent 逻辑为单一来源,GUI 直接复用本模块函数,不另写门逻辑。
+- 图形摄入前端 `lawiki/ingest_gui.py`(tkinter,仅标准库):文件夹选择 + 本地/云端 OCR 权衡说明 + token/consent + 实时进度条 + 完成摘要与下一步。薄前端 shell out 到 `ingest.py`,不重实现任何门/退出码/consent;token 仅经子进程环境变量注入,**绝不落盘**。无桌面环境明确中文报错并以专用退出码(3)退出,绝不静默降级无头。
+- 案件自动搭建 `_setup_case`:用户只给一个 case 路径,系统幂等地把根下散落的非脚手架条目移动进 `原始资料/`(可续传、同名不覆盖、跳过隐藏项与脚手架)。移动清单记入 `ingest-report.json` 的 `stages.setup.moved`,事后可查;GUI 移动前预览并要用户确认(防"指错文件夹把整盘搬走")。
+
+### Changed
+
+- lawiki SKILL 第一步收敛为 **GUI-only 摄入入口**:agent 后台启动 GUI、以 `ingest-report.json` 出现 + GUI 退出为完成信号,再进建 wiki/问答;无头 `ingest.py` 仍为引擎底座,但降为 CI/无桌面兜底,不再作为给 agent 的 sanctioned 用户路径。
+- 摄入引擎的建索引与源级对账改为直接复用 `rag.index_case` / `reconcile.reconcile` 纯函数(不再 shell out 解析 stdout);`_RESERVED_CASE_ENTRIES` 从 `init_case.SCAFFOLD_ENTRIES` 单一来源派生,防脚手架清单漂移。
+
 ## 1.8.0 - 2026-08-08
 
 ### Added
