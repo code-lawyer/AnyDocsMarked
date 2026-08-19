@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """ingest.py 回归测试（stdlib unittest，零依赖，镜像 test_install.py）。"""
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -400,6 +401,75 @@ class SetupCaseTests(unittest.TestCase):
             case = Path(td)
             self.assertEqual(ingest._setup_case(case), [])
             self.assertFalse((case / "原始资料").exists())  # 无可移动项 → 不建 原始资料/
+
+
+class ParserChoiceFlagsTests(unittest.TestCase):
+    def test_parser_defines_choice_flags(self):
+        args = ingest._build_parser().parse_args(
+            ["/case", "--ocr-cross-check", "--structure-headings", "--rag-parent-context"])
+        self.assertTrue(args.ocr_cross_check)
+        self.assertTrue(args.structure_headings)
+        self.assertTrue(args.rag_parent_context)
+
+    def test_choice_flags_default_off(self):
+        args = ingest._build_parser().parse_args(["/case"])
+        self.assertFalse(args.ocr_cross_check)
+        self.assertFalse(args.structure_headings)
+        self.assertFalse(args.rag_parent_context)
+
+
+class RunIndexParentContextTests(unittest.TestCase):
+    def _capture_env_during_index(self, parent_context):
+        captured = {}
+
+        def fake_index(case):
+            captured["v"] = os.environ.get("RAG_PARENT_CONTEXT")
+            return {"ok": True, "files_indexed": 1, "files_skipped": 0}
+
+        with mock.patch.object(ingest, "_index_case", fake_index):
+            ingest._run_index(Path("/case"), dry_run=False, parent_context=parent_context)
+        return captured["v"]
+
+    def test_parent_context_env_set_when_enabled(self):
+        self.assertEqual(self._capture_env_during_index(True), "1")
+
+    def test_parent_context_env_absent_by_default(self):
+        self.assertIsNone(self._capture_env_during_index(False))
+
+    def test_parent_context_env_restored_after(self):
+        self.assertNotIn("RAG_PARENT_CONTEXT", os.environ)
+        self._capture_env_during_index(True)
+        self.assertNotIn("RAG_PARENT_CONTEXT", os.environ)  # 跑完清理，不污染进程
+
+
+class BuildConvertArgvTests(unittest.TestCase):
+    def _base(self, **kw):
+        opts = dict(ocr_engine="local", workers=4, cloud_consent=False, skip_existing=False)
+        opts.update(kw)
+        return ingest.build_convert_argv(Path("raw"), Path("md"), **opts)
+
+    def test_includes_cross_check_when_enabled(self):
+        self.assertIn("--ocr-cross-check", self._base(cross_check=True))
+
+    def test_omits_choice_flags_by_default(self):
+        argv = self._base()
+        self.assertNotIn("--ocr-cross-check", argv)
+        self.assertNotIn("--structure-headings", argv)
+
+    def test_includes_structure_headings_when_enabled(self):
+        self.assertIn("--structure-headings", self._base(structure_headings=True))
+
+    def test_never_disables_quality_check(self):
+        # FLOOR: sanctioned 路径绝不关质检，无论其它选项如何。
+        argv = self._base(cloud_consent=True, skip_existing=True,
+                          cross_check=True, structure_headings=True)
+        self.assertNotIn("--no-quality-check", argv)
+
+    def test_carries_engine_and_workers(self):
+        argv = self._base(ocr_engine="auto", workers=2)
+        self.assertIn("--ocr-engine", argv)
+        self.assertIn("auto", argv)
+        self.assertIn("--workers", argv)
 
 
 if __name__ == "__main__":

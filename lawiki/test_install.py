@@ -9,6 +9,7 @@
 ② 旧版 rag_available 检查硬编码字面量 "rag-retriever"，不读 LAWIKI_RAG_CMD，
   于是设了覆盖也测不到——同一类"测错实例"的坑，_rag_cmd() 统一了两处。
 """
+import json
 import subprocess
 import sys
 import tempfile
@@ -167,6 +168,41 @@ class InstalledCommandTests(unittest.TestCase):
             with (mock.patch.dict(install.os.environ, {"UV_TOOL_BIN_DIR": td}),
                   mock.patch.object(install.shutil, "which", return_value=None)):
                 self.assertEqual(install._installed_command("makeitdown"), [str(command)])
+
+
+class AnswerGateReadyTests(unittest.TestCase):
+    def _settings(self, td, obj):
+        p = Path(td) / "settings.json"
+        p.write_text(json.dumps(obj), encoding="utf-8")
+        return p
+
+    def test_ready_when_stop_hook_configured(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self._settings(td, {"hooks": {"Stop": [{"hooks": [
+                {"type": "command", "command": 'python "X/lint/stop_hook.py"'}]}]}})
+            self.assertTrue(install._check_answer_gate_ready([p]))
+
+    def test_not_ready_when_hook_absent(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self._settings(td, {"hooks": {}})
+            self.assertFalse(install._check_answer_gate_ready([p]))
+
+    def test_not_ready_when_no_file(self):
+        # best-effort：读不到文件不抛异常，按未就绪处理。
+        self.assertFalse(install._check_answer_gate_ready([Path("/nope/settings.json")]))
+
+    def test_stop_hook_string_outside_stop_hook_is_not_ready(self):
+        # 结构化匹配：'stop_hook' 出现在非 Stop 钩子里不算就绪（旧的整串 grep 会误报）。
+        with tempfile.TemporaryDirectory() as td:
+            p = self._settings(td, {"hooks": {"PreToolUse": [{"hooks": [
+                {"type": "command", "command": 'python "X/lint/stop_hook.py"'}]}]}})
+            self.assertFalse(install._check_answer_gate_ready([p]))
+
+    def test_unreadable_json_is_not_ready_not_raise(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "settings.json"
+            p.write_text("{not json", encoding="utf-8")
+            self.assertFalse(install._check_answer_gate_ready([p]))
 
 
 if __name__ == "__main__":

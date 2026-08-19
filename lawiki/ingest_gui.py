@@ -19,7 +19,8 @@ import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-import ingest
+import ingest  # 须先于 capabilities：其导入把 skill/lawiki/tools 加进 sys.path
+from capabilities import load_capabilities
 
 _PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]\s+(.)\s+(.*)$")
 _GLYPH_STATUS = {"✓": "succeeded", "⚠": "warned", "✗": "failed",
@@ -57,10 +58,24 @@ def summarize_report(merged: dict) -> str:
     return "\n".join(lines)
 
 
-def resolve_engine_argv(engine: str, cloud_consent: bool) -> list[str]:
-    argv = ["--ocr-engine", engine]
-    if cloud_consent:
+def choice_controls() -> list[dict]:
+    """契约里 phase=ingest 的 CHOICE 能力（GUI 该渲染的开关），单一来源于 capabilities.json。"""
+    return [c for c in load_capabilities()
+            if c["tier"] == "CHOICE" and c.get("phase") == "ingest"
+            and c.get("sanctioned", {}).get("gui_control")]
+
+
+def build_ingest_argv(options: dict) -> list[str]:
+    """从 options 拼 ingest.py 的 argv（引擎/consent + 契约中启用的 CHOICE 标志）。
+    纯函数：GUI 与契约测试共用，能力清单只读 capabilities.json，不各抄一份。"""
+    argv = ["--ocr-engine", options.get("engine", "auto")]
+    if options.get("cloud_consent"):
         argv.append("--cloud-consent")
+    for cap in choice_controls():
+        s = cap["sanctioned"]
+        flag = s.get("ingest_flag")
+        if flag and options.get(s["gui_control"]):
+            argv.append(flag)
     return argv
 
 
@@ -98,6 +113,9 @@ class IngestApp(tk.Tk):
         self.engine = tk.StringVar(value=cfg["engine"])
         self.consent = tk.BooleanVar(value=False)
         self.token_var = tk.StringVar(value="")
+        # 契约中 phase=ingest 的 CHOICE 能力 → 每个一个开关（默认关，可见可选）。
+        self._choice_vars = {c["sanctioned"]["gui_control"]: tk.BooleanVar(value=False)
+                             for c in choice_controls()}
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
         self._q: queue.Queue = queue.Queue()
@@ -132,8 +150,25 @@ class IngestApp(tk.Tk):
         self._cloud_box.pack(fill="x", pady=8)
         self._refresh_cloud_box()
 
+        self._build_advanced_box()
+
         tk.Button(self._container, text="开始摄入 ▶", font=("", 12, "bold"),
                   command=self._on_start).pack(pady=16)
+
+    def _build_advanced_box(self) -> None:
+        """③ 高级（可选加强）：为契约中每个 phase=ingest 的 CHOICE 能力渲染一个开关 +
+        权衡说明。默认全关但可见——把"容易被静默跳过的加强项"摆到人面前，由用户拍板。"""
+        caps = choice_controls()
+        if not caps:
+            return
+        tk.Label(self._container, text="③ 高级（可选加强，默认关）",
+                 font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        for cap in caps:
+            gc = cap["sanctioned"]["gui_control"]
+            tk.Checkbutton(self._container, text=cap["promise"],
+                           variable=self._choice_vars[gc]).pack(anchor="w")
+            tk.Message(self._container, text="⚖ " + cap["tradeoff"], width=580,
+                       fg="#666").pack(anchor="w")
 
     def _refresh_cloud_box(self) -> None:
         for w in self._cloud_box.winfo_children():
@@ -200,19 +235,19 @@ class IngestApp(tk.Tk):
         self._logbox = tk.Text(self._container, height=16, wrap="none")
         self._logbox.pack(fill="both", expand=True, pady=8)
         # tk.Variable.get() 走 Tcl，只能在主线程调用；在此（主线程）快照成普通
-        # Python 值再传给 worker 线程，worker 线程自身绝不碰 self.*.get()。
-        engine = self.engine.get()
-        consent = self.consent.get()
+        # Python 值（含每个 CHOICE 开关）再传给 worker 线程，worker 绝不碰 self.*.get()。
+        options = {"engine": self.engine.get(), "cloud_consent": self.consent.get()}
+        options.update({gc: var.get() for gc, var in self._choice_vars.items()})
         token = self.token_var.get().strip()
-        self._thread = threading.Thread(target=self._worker, args=(engine, consent, token), daemon=True)
+        self._thread = threading.Thread(target=self._worker, args=(options, token), daemon=True)
         self._thread.start()
         self.after(150, self._pump)
 
-    def _worker(self, engine: str, consent: bool, token: str) -> None:
+    def _worker(self, options: dict, token: str) -> None:
         # 与 agent 完全相同的 CLI；token 只经子进程环境变量注入，不落盘。
         ingest_py = Path(__file__).resolve().parent / "ingest.py"
         argv = [sys.executable, str(ingest_py), str(self.case_dir),
-                *resolve_engine_argv(engine, consent)]
+                *build_ingest_argv(options)]
         env = os.environ.copy()
         # makeitdown 等子进程把进度符号（✓⚠✗=→）写到 stderr；GUI 按 UTF-8 解码
         # 管道，子进程若落到本地 GBK locale 会乱码甚至 UnicodeEncodeError，逼它

@@ -1,3 +1,4 @@
+import os
 import threading
 from pathlib import Path
 
@@ -7,6 +8,8 @@ from .ocr_cloud import CloudOCR
 from .ocr_crosscheck import compare
 from .ocr_local import LocalOCR
 from .ocr_mineru import MinerUCloud, MinerULocal
+from .ocr_rotate import resolve_best_angle
+from .router import IMAGE_EXTS
 
 # Private alias that keeps the original class reference even when the module-level
 # `LocalOCR` name is replaced by monkeypatching in tests.  Availability checks
@@ -38,6 +41,8 @@ class OCRDispatcher:
         cross_check_mode: str = "cloud",
         cloud_consent: bool = False,
         mineru_token: str | None = None,
+        rotate: bool = True,
+        rotate_min_confidence: float = 0.6,
     ):
         self.engine = engine
         self.model = model
@@ -48,6 +53,9 @@ class OCRDispatcher:
         self.cross_check_mode = cross_check_mode
         self.cloud_consent = cloud_consent
         self.mineru_token = mineru_token
+        # 旋转纠偏（FLOOR，默认开）：仅对首轮 OCR 低置信的扫描件重探，限住成本。
+        self.rotate = rotate
+        self.rotate_min_confidence = rotate_min_confidence
         self._backend = None
         self._verifier = None
         self._verifier_resolved = False
@@ -106,8 +114,40 @@ class OCRDispatcher:
             return MinerUCloud(token=self.mineru_token)
         return None
 
+    def _ocr_at_angle(self, path: Path, angle: int) -> ConversionResult:
+        """Rotate a scanned image by ``angle`` and OCR it (for the reorient probe)."""
+        import tempfile
+
+        from PIL import Image
+
+        with Image.open(path) as img:
+            rotated = img.rotate(angle, expand=True)
+            fd, tmp = tempfile.mkstemp(suffix=path.suffix)
+            os.close(fd)
+            try:
+                rotated.save(tmp)
+                return self._resolve_backend().convert(Path(tmp))
+            finally:
+                Path(tmp).unlink(missing_ok=True)
+
+    def _reorient(self, path: Path, primary: ConversionResult) -> ConversionResult:
+        """When a scanned image OCRs with low confidence, pick the upright angle.
+        Only image inputs are rotatable here; the primary result is never lost."""
+        if path.suffix.lower() not in IMAGE_EXTS:
+            return primary
+        results = {0: primary}
+
+        def probe(angle: int):
+            results[angle] = self._ocr_at_angle(path, angle)
+            return results[angle].confidences
+
+        best = resolve_best_angle(primary.confidences, probe, self.rotate_min_confidence)
+        return results.get(best, primary)
+
     def convert(self, path: Path) -> ConversionResult:
         result = self._resolve_backend().convert(path)
+        if self.rotate:
+            result = self._reorient(path, result)
         if not self.cross_check:
             return result
         verifier = self._make_verifier()

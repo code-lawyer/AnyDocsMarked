@@ -128,6 +128,10 @@ uv tool install --index https://mirrors.aliyun.com/pypi/simple "rag-retriever @ 
 
 用环境变量选：`RAG_EMBED_BACKEND=local|ollama|openai`（默认 `local`）；`openai` 另需 `RAG_OPENAI_API_KEY`（硅基流动）。key 绝不写进文件、不提交。
 
+**答案侧可选加强（查询期能力，能力接线契约里标 `phase=answer`）**：这两项在**问答**阶段生效，不由摄入 GUI 控制，按需在答案环境设环境变量——
+- `RAG_RERANK=local`：交叉编码器重排，提升精排质量；需联网下载重排模型、更慢。
+- `RAG_MIN_SCORE=<0~1>`：向量通道相关度下限，滤掉弱命中；设太高会漏检、太低无效，默认 `0`（关）。
+
 **一致性铁规**：索引与查询**必须同一 embedding 模型**，否则相似度失真。机制：rag-retriever 索引时把模型记进 `.rag/`，wrapper 查询前自动比对、不一致即降级并提示 rebuild（删 `.rag/` 重建索引）。**换模型 = 必须重建索引。**
 
 ## 第 3 步再补 · 问答交付闸门加硬（可选，仅 Claude Code）

@@ -168,14 +168,35 @@ def _run_init_case(case_dir: Path, *, dry_run: bool) -> None:
     subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")
 
 
-def _run_convert(raw_dir: Path, md_dir: Path, *, ocr_engine: str, cloud_consent: bool,
-                 workers: int, skip_existing: bool, dry_run: bool) -> tuple[dict | None, int]:
-    cmd = ["makeitdown", raw_dir.as_posix(), "-o", md_dir.as_posix(),
-           "--ocr-engine", ocr_engine, "--workers", str(workers)]
+def build_convert_argv(raw_dir: Path, md_dir: Path, *, ocr_engine: str, workers: int,
+                       cloud_consent: bool, skip_existing: bool,
+                       cross_check: bool = False, cross_check_mode: str = "cloud",
+                       structure_headings: bool = False) -> list[str]:
+    """拼 makeitdown 命令（sanctioned 路径的单一来源，供 _run_convert 与契约测试复用）。
+    FLOOR 保证：绝不产出 --no-quality-check（质检是下限，不由本路径关闭）。CHOICE 项
+    （cross-check / structure-headings）默认关，仅在显式启用时透传。"""
+    argv = ["makeitdown", raw_dir.as_posix(), "-o", md_dir.as_posix(),
+            "--ocr-engine", ocr_engine, "--workers", str(workers)]
     if cloud_consent:
-        cmd.append("--cloud-consent")
+        argv.append("--cloud-consent")
     if skip_existing:
-        cmd.append("--skip-existing")
+        argv.append("--skip-existing")
+    if cross_check:
+        argv += ["--ocr-cross-check", "--cross-check-mode", cross_check_mode]
+    if structure_headings:
+        argv.append("--structure-headings")
+    return argv
+
+
+def _run_convert(raw_dir: Path, md_dir: Path, *, ocr_engine: str, cloud_consent: bool,
+                 workers: int, skip_existing: bool, dry_run: bool,
+                 cross_check: bool = False, cross_check_mode: str = "cloud",
+                 structure_headings: bool = False) -> tuple[dict | None, int]:
+    cmd = build_convert_argv(
+        raw_dir, md_dir, ocr_engine=ocr_engine, workers=workers,
+        cloud_consent=cloud_consent, skip_existing=skip_existing,
+        cross_check=cross_check, cross_check_mode=cross_check_mode,
+        structure_headings=structure_headings)
     _say("将执行: " + " ".join(cmd))
     if dry_run:
         return None, 0
@@ -189,13 +210,26 @@ def _run_convert(raw_dir: Path, md_dir: Path, *, ocr_engine: str, cloud_consent:
     return None, proc.returncode
 
 
-def _run_index(case_dir: Path, *, dry_run: bool) -> tuple[dict | None, bool]:
+def _run_index(case_dir: Path, *, dry_run: bool,
+               parent_context: bool = False) -> tuple[dict | None, bool]:
     # 复用 rag.index_case（单一来源：--exclude report.json、--metadata-fields 等约定都在那）。
     # ok=False 且原因含「未安装」→ 降级(不阻塞)；其它失败 → 记 0/0 让完整性门拦。
+    # parent_context（索引期 CHOICE）：rag.index_case 经 subprocess 继承 os.environ，
+    # 故在此进程内设 RAG_PARENT_CONTEXT 即可传给子进程；跑完恢复，不污染本进程。
     _say(f"将执行: rag.index_case({case_dir.as_posix()})（建 .rag 索引，排除 report.json）")
     if dry_run:
         return None, True
-    result = _index_case(case_dir)
+    _prev_pc = os.environ.get("RAG_PARENT_CONTEXT")
+    if parent_context:
+        os.environ["RAG_PARENT_CONTEXT"] = "1"
+    try:
+        result = _index_case(case_dir)
+    finally:
+        if parent_context:
+            if _prev_pc is None:
+                os.environ.pop("RAG_PARENT_CONTEXT", None)
+            else:
+                os.environ["RAG_PARENT_CONTEXT"] = _prev_pc
     if result.get("ok"):
         return {"files_indexed": result.get("files_indexed", 0),
                 "files_skipped": result.get("files_skipped", 0)}, True
@@ -219,12 +253,7 @@ def _run_reconcile(case_dir: Path, *, dry_run: bool) -> list[str]:
     return unresolved
 
 
-def main(argv: list[str]) -> int:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
+def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ingest.py", description="AnyDocsMarked 摄入引擎")
     p.add_argument("case_dir", help="案件目录（含 原始资料/ 子目录）")
     p.add_argument("--ocr-engine", choices=["auto", "local", "cloud"], default="auto")
@@ -234,7 +263,25 @@ def main(argv: list[str]) -> int:
     p.add_argument("--skip-existing", action="store_true")
     p.add_argument("--skip-index", action="store_true", help="只转换、不建 .rag 索引")
     p.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")
-    args = p.parse_args(argv)
+    # 能力接线契约的 CHOICE 项（phase=ingest）：默认关，显式启用才透传。
+    p.add_argument("--ocr-cross-check", action="store_true",
+                   help="双 OCR 互校（金额/日期防错）；需第二引擎(MinerU)或云端 token")
+    p.add_argument("--cross-check-mode", choices=["cloud", "local", "auto"], default="cloud",
+                   help="双 OCR 校验器模式（透传给 makeitdown）")
+    p.add_argument("--structure-headings", action="store_true",
+                   help="用 LLM 重建标题层级（需 MAKEITDOWN_LLM_* 环境变量 + consent）")
+    p.add_argument("--rag-parent-context", action="store_true",
+                   help="small-to-big：索引期返回父块上下文（设 RAG_PARENT_CONTEXT）")
+    return p
+
+
+def main(argv: list[str]) -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    args = _build_parser().parse_args(argv)
 
     case = Path(args.case_dir).resolve()
     raw, md = case / "原始资料", case / "_md"
@@ -269,7 +316,9 @@ def main(argv: list[str]) -> int:
 
     convert, rc = _run_convert(
         raw, md, ocr_engine=args.ocr_engine, cloud_consent=args.cloud_consent,
-        workers=args.workers, skip_existing=args.skip_existing, dry_run=args.dry_run)
+        workers=args.workers, skip_existing=args.skip_existing, dry_run=args.dry_run,
+        cross_check=args.ocr_cross_check, cross_check_mode=args.cross_check_mode,
+        structure_headings=args.structure_headings)
 
     if args.dry_run:
         _run_index(case, dry_run=True)
@@ -285,7 +334,8 @@ def main(argv: list[str]) -> int:
     if args.skip_index:
         index, index_ran = {}, False
     else:
-        index, index_ran = _run_index(case, dry_run=False)
+        index, index_ran = _run_index(case, dry_run=False,
+                                      parent_context=args.rag_parent_context)
         index = index or {}
 
     reconcile_reasons = _run_reconcile(case, dry_run=False)

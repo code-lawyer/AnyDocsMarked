@@ -49,11 +49,11 @@ class SummarizeTests(unittest.TestCase):
 
 class EngineArgvTests(unittest.TestCase):
     def test_cloud_with_consent(self):
-        self.assertEqual(g.resolve_engine_argv("cloud", True),
+        self.assertEqual(g.build_ingest_argv({"engine": "cloud", "cloud_consent": True}),
                          ["--ocr-engine", "cloud", "--cloud-consent"])
 
     def test_local_no_consent(self):
-        self.assertEqual(g.resolve_engine_argv("local", False), ["--ocr-engine", "local"])
+        self.assertEqual(g.build_ingest_argv({"engine": "local"}), ["--ocr-engine", "local"])
 
 
 class ConfigTests(unittest.TestCase):
@@ -82,6 +82,29 @@ class MainGuardTests(unittest.TestCase):
             rc = g.main([])
         fake_app.mainloop.assert_called_once()
         self.assertEqual(rc, 0)
+
+
+class BuildIngestArgvTests(unittest.TestCase):
+    def test_engine_and_consent(self):
+        argv = g.build_ingest_argv({"engine": "auto", "cloud_consent": True})
+        self.assertIn("--ocr-engine", argv)
+        self.assertIn("auto", argv)
+        self.assertIn("--cloud-consent", argv)
+
+    def test_choice_flags_only_when_enabled(self):
+        argv = g.build_ingest_argv({"engine": "local", "cross_check": True})
+        self.assertIn("--ocr-cross-check", argv)
+        self.assertNotIn("--structure-headings", argv)
+        self.assertNotIn("--rag-parent-context", argv)
+
+    def test_parent_context_flag(self):
+        argv = g.build_ingest_argv({"engine": "local", "parent_context": True})
+        self.assertIn("--rag-parent-context", argv)
+
+    def test_no_choice_by_default(self):
+        argv = g.build_ingest_argv({"engine": "local"})
+        for flag in ("--ocr-cross-check", "--structure-headings", "--rag-parent-context"):
+            self.assertNotIn(flag, argv)
 
 
 if __name__ == "__main__":

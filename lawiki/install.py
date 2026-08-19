@@ -196,6 +196,42 @@ def _live_embed_backend(rag_cmd: list[str]) -> str:
         return "local"
 
 
+def _default_settings_paths() -> list[Path]:
+    """Claude Code settings 候选位置（用户级 + 项目级），best-effort。"""
+    home = Path.home()
+    cwd = Path.cwd()
+    return [home / ".claude" / "settings.json",
+            cwd / ".claude" / "settings.json",
+            cwd / ".claude" / "settings.local.json"]
+
+
+def _check_answer_gate_ready(settings_paths: list[Path] | None = None) -> bool:
+    """探测问答后闸门（stop_hook）是否已挂进 Claude Code settings 的 Stop 钩子。
+    按 setup.md 记录的结构匹配（hooks.Stop[].hooks[].command 引用 stop_hook）——
+    而非整串 grep，免得别处偶然出现 'stop_hook' 就误报就绪。best-effort：读不到/
+    解析失败按未就绪，绝不抛异常、绝不自动写入用户配置（尊重不侵入）。"""
+    for p in (settings_paths if settings_paths is not None else _default_settings_paths()):
+        try:
+            data = json.loads(Path(p).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        hooks = data.get("hooks") if isinstance(data, dict) else None
+        stop_groups = hooks.get("Stop") if isinstance(hooks, dict) else None
+        for group in stop_groups or []:
+            for hook in (group.get("hooks") or []) if isinstance(group, dict) else []:
+                if isinstance(hook, dict) and "stop_hook" in (hook.get("command") or ""):
+                    return True
+    return False
+
+
+def _say_answer_gate_status() -> None:
+    if _check_answer_gate_ready():
+        _say("✓ 问答后闸门（stop_hook）已就绪：回答含未锚定事实会被自动拦下。")
+    else:
+        _say("⚠ 问答后闸门（stop_hook）未启用——'不编造'的自动强制当前不生效。")
+        _say("  按 references/setup.md 把 stop_hook.py 挂进 Claude Code settings.json 的 Stop 钩子后即生效。")
+
+
 def _check_offline() -> None:
     """断网就绪自检：只查不装，逐项报告 ✓/✗ 与国内替代路径。退出码恒 0。
     embedding/分词一项对 lawiki 实际会调用的运行实例做真实探针（见
@@ -236,6 +272,7 @@ def _check_offline() -> None:
     _say("  提示：reranker（RAG_RERANK=local）默认关闭，开启需联网下载；")
     _say("        ollama 后端拉模型走境外 registry，国内建议 local（内置）或 openai（硅基流动）；")
     _say("        MinerU 互校默认已从 ModelScope（魔搭）拉权重，国内首用无需 HuggingFace。")
+    _say_answer_gate_status()
 
 
 def main(argv: list[str]) -> int:
@@ -314,6 +351,7 @@ def main(argv: list[str]) -> int:
         _say(f"  {part}: {status}")
     _say("lawiki skill 无需安装：让 agent 加载 bundle 内 skill/lawiki 即可。")
     _say('就绪后把文件放进案件目录的 原始资料/，对 agent 说「整理案件资料」。')
+    _say_answer_gate_status()
     if args.ocr == "cloud":
         _say("云端 OCR 需设 PADDLEOCR_AISTUDIO_TOKEN，见 skill/lawiki/references/setup.md。")
     # Mirrors rag_retriever.embed._BUNDLED_MODELS_DIR (stdlib-only installer can't

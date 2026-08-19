@@ -1,0 +1,102 @@
+[
+  {
+    "id": "ocr_quality_check",
+    "promise": "输出质检标记（低字符/乱码/重复/低置信）默认启用，不静默放过可疑转换",
+    "owner": "makeitdown",
+    "tier": "FLOOR",
+    "phase": "ingest",
+    "sanctioned": {"forbid_flag": "--no-quality-check", "default_on": true}
+  },
+  {
+    "id": "source_reconcile",
+    "promise": "三态覆盖账本 + 源级对账：每个源文件已引用/已登记跳过/未处置",
+    "owner": "lawiki",
+    "tier": "FLOOR",
+    "phase": "ingest",
+    "sanctioned": {"assert": "ingest.main 调 _run_reconcile", "default_on": true}
+  },
+  {
+    "id": "rag_hybrid",
+    "promise": "BM25 + 向量混合检索（RRF），法律近义术语精确召回",
+    "owner": "rag",
+    "tier": "FLOOR",
+    "phase": "ingest",
+    "sanctioned": {"assert": "Config.hybrid 默认 True", "default_on": true}
+  },
+  {
+    "id": "provenance_sha",
+    "promise": "原件与转换正文写入双 SHA-256，ingest 闸门复核",
+    "owner": "makeitdown",
+    "tier": "FLOOR",
+    "phase": "ingest",
+    "sanctioned": {"assert": "frontmatter 写 origin/body sha256", "default_on": true}
+  },
+  {
+    "id": "ocr_rotation",
+    "promise": "扫描件旋转纠偏：识别前选正向，避免旋转页 OCR 乱码",
+    "owner": "makeitdown",
+    "tier": "FLOOR",
+    "phase": "ingest",
+    "sanctioned": {"assert": "convert_ocr 集成 ocr_rotate.best_rotation_angle（低置信触发）", "default_on": true}
+  },
+  {
+    "id": "answer_gate",
+    "promise": "问答后闸门：回答含未锚定事实即拦（宁可查不出，也不编造）",
+    "owner": "lawiki",
+    "tier": "FLOOR",
+    "phase": "answer",
+    "sanctioned": {"assert": "install._check_answer_gate_ready 检测 stop_hook 就绪并告警", "default_on": true}
+  },
+  {
+    "id": "ocr_cross_check",
+    "promise": "金额/日期错一位就是事故 —— 双 OCR 互校 + 数字/日期位专项比对",
+    "owner": "makeitdown",
+    "tier": "CHOICE",
+    "phase": "ingest",
+    "tradeoff": "更慢、需第二引擎（MinerU 本地或云端 token）；换来抓出两引擎的金额/日期识别分歧",
+    "sanctioned": {"ingest_flag": "--ocr-cross-check", "gui_control": "cross_check", "default_on": false}
+  },
+  {
+    "id": "structure_headings",
+    "promise": "LLM 重建 OCR 输出的标题层级，改善结构感知分块",
+    "owner": "makeitdown",
+    "tier": "CHOICE",
+    "phase": "ingest",
+    "tradeoff": "需 LLM 凭证 + consent，会把正文外传给 LLM；换来更准的标题层级",
+    "sanctioned": {"ingest_flag": "--structure-headings", "gui_control": "structure_headings", "default_on": false}
+  },
+  {
+    "id": "rag_parent_context",
+    "promise": "small-to-big 检索：索引细粒度子块、返回父块上下文",
+    "owner": "rag",
+    "tier": "CHOICE",
+    "phase": "ingest",
+    "tradeoff": "索引更细、体积更大、建索引更慢；换来命中片段带更完整上下文",
+    "sanctioned": {"ingest_flag": "--rag-parent-context", "env": "RAG_PARENT_CONTEXT", "gui_control": "parent_context", "default_on": false}
+  },
+  {
+    "id": "rag_rerank",
+    "promise": "交叉编码器重排，提升检索精排质量",
+    "owner": "rag",
+    "tier": "CHOICE",
+    "phase": "answer",
+    "tradeoff": "查询期能力：更慢、需联网下载重排模型；由答案侧 RAG_RERANK 启用",
+    "sanctioned": {"env": "RAG_RERANK", "default_on": false}
+  },
+  {
+    "id": "rag_min_score",
+    "promise": "向量通道相关度下限，滤掉弱命中",
+    "owner": "rag",
+    "tier": "CHOICE",
+    "phase": "answer",
+    "tradeoff": "查询期能力：设太高会漏检、太低无效；由答案侧 RAG_MIN_SCORE 启用",
+    "sanctioned": {"env": "RAG_MIN_SCORE", "default_on": false}
+  },
+  {
+    "id": "keep_images",
+    "promise": "",
+    "owner": "makeitdown",
+    "tier": "OUT",
+    "rationale": "法律文本以文字为准；扫描图片留存是排版偏好，非承诺相关，不纳入 sanctioned 接线契约。"
+  }
+]

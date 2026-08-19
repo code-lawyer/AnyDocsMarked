@@ -162,3 +162,54 @@ def test_verifier_cloud_with_token_but_no_consent_never_builds(monkeypatch):
                         lambda *a, **k: built.__setitem__("cloud", True))
     assert d._make_verifier() is None
     assert built["cloud"] is False  # MinerUCloud was never constructed → no upload
+
+
+# ---------------------------------------------------------------------------
+# Rotation reorientation tests (dead-code ocr_rotate wired into OCR path)
+# ---------------------------------------------------------------------------
+
+class _Backend:
+    def __init__(self, confs):
+        self._confs = confs
+
+    def convert(self, path):
+        return ConversionResult(text="upright", engine="local:pp-structurev3",
+                                pages=1, confidences=self._confs)
+
+
+def _rotate_dispatcher(monkeypatch, primary_confs):
+    d = co.OCRDispatcher(engine="local")
+    monkeypatch.setattr(d, "_resolve_backend", lambda: _Backend(primary_confs))
+    return d
+
+
+def test_low_confidence_scan_reorients_to_best_angle(monkeypatch, tmp_path):
+    d = _rotate_dispatcher(monkeypatch, [0.30])
+    monkeypatch.setattr(d, "_ocr_at_angle", lambda path, angle: ConversionResult(
+        text=f"rot{angle}", engine="local:pp-structurev3",
+        confidences=[0.95] if angle == 90 else [0.10]))
+    img = tmp_path / "scan.png"
+    img.write_bytes(b"stub")
+    r = d.convert(img)
+    assert r.text == "rot90"
+
+
+def test_high_confidence_scan_never_probes(monkeypatch, tmp_path):
+    d = _rotate_dispatcher(monkeypatch, [0.92])
+    calls = []
+    monkeypatch.setattr(d, "_ocr_at_angle", lambda path, angle: calls.append(angle))
+    img = tmp_path / "scan.png"
+    img.write_bytes(b"stub")
+    r = d.convert(img)
+    assert r.text == "upright"
+    assert calls == []
+
+
+def test_non_image_never_probes(monkeypatch, tmp_path):
+    d = _rotate_dispatcher(monkeypatch, [0.10])
+    calls = []
+    monkeypatch.setattr(d, "_ocr_at_angle", lambda path, angle: calls.append(angle))
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"stub")
+    d.convert(pdf)
+    assert calls == []  # PDF not rotatable here → no cost even at low confidence
