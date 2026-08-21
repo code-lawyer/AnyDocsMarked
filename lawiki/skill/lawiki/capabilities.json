@@ -6,7 +6,10 @@
     "tier": "FLOOR",
     "phase": "ingest",
     "enforcement": "makeitdown 默认 quality_check=True；ingest 的 build_convert_argv 绝不产出 --no-quality-check",
-    "sanctioned": {"forbid_flag": "--no-quality-check", "default_on": true}
+    "sanctioned": {
+      "forbid_flag": "--no-quality-check",
+      "default_on": true
+    }
   },
   {
     "id": "source_reconcile",
@@ -15,7 +18,10 @@
     "tier": "FLOOR",
     "phase": "ingest",
     "enforcement": "ingest.main 必调 _run_reconcile；未处置>0 完整性门返回非 0",
-    "sanctioned": {"assert": "ingest.main 调 _run_reconcile", "default_on": true}
+    "sanctioned": {
+      "assert": "ingest.main 调 _run_reconcile",
+      "default_on": true
+    }
   },
   {
     "id": "rag_hybrid",
@@ -24,7 +30,10 @@
     "tier": "FLOOR",
     "phase": "ingest",
     "enforcement": "rag Config.hybrid 默认 True（由 rag 自身测试套件强制）",
-    "sanctioned": {"env": "RAG_HYBRID", "default_on": true}
+    "sanctioned": {
+      "env": "RAG_HYBRID",
+      "default_on": true
+    }
   },
   {
     "id": "provenance_sha",
@@ -33,7 +42,10 @@
     "tier": "FLOOR",
     "phase": "ingest",
     "enforcement": "makeitdown frontmatter 默认写 origin/body sha256（由 makeitdown 自身测试强制）",
-    "sanctioned": {"assert": "frontmatter 写 origin/body sha256", "default_on": true}
+    "sanctioned": {
+      "assert": "frontmatter 写 origin/body sha256",
+      "default_on": true
+    }
   },
   {
     "id": "ocr_rotation",
@@ -42,7 +54,10 @@
     "tier": "FLOOR",
     "phase": "ingest",
     "enforcement": "makeitdown convert_ocr 集成 ocr_rotate.best_rotation_angle（低置信触发；由 makeitdown 自身测试强制）",
-    "sanctioned": {"assert": "convert_ocr 集成 ocr_rotate（低置信触发）", "default_on": true}
+    "sanctioned": {
+      "assert": "convert_ocr 集成 ocr_rotate（低置信触发）",
+      "default_on": true
+    }
   },
   {
     "id": "answer_gate",
@@ -51,7 +66,10 @@
     "tier": "FLOOR",
     "phase": "answer",
     "enforcement": "install._check_answer_gate_ready 检测 stop_hook 就绪并告警；stop_hook 在 harness 每次回复确定性校验锚点",
-    "sanctioned": {"assert": "install._check_answer_gate_ready 检测 stop_hook 并告警", "default_on": true}
+    "sanctioned": {
+      "assert": "install._check_answer_gate_ready 检测 stop_hook 并告警",
+      "default_on": true
+    }
   },
   {
     "id": "ocr_engine",
@@ -62,14 +80,44 @@
     "tradeoff": "本地 PaddleOCR 私密但重装/较慢；云端 AI Studio 轻快但上传正文、需 token + 显式同意",
     "enforcement": "makeitdown --ocr-engine/--cloud-consent 代码门（require_cloud_consent）；token 经子进程 env",
     "inputs": [
-      {"id": "engine", "label": "OCR 引擎", "kind": "select",
-       "options": ["auto", "local", "cloud"], "flag": "--ocr-engine", "default": "auto"},
-      {"id": "cloud_token", "label": "云端 OCR token（云端/auto 用）", "kind": "secret",
-       "env": "PADDLEOCR_AISTUDIO_TOKEN", "required_when": {"engine": ["cloud"]}},
-      {"id": "cloud_consent", "label": "我同意：云端会上传文档", "kind": "bool",
-       "flag": "--cloud-consent", "required_when": {"engine": ["cloud"]}}
+      {
+        "id": "engine",
+        "label": "OCR 引擎",
+        "kind": "select",
+        "options": [
+          "auto",
+          "local",
+          "cloud"
+        ],
+        "flag": "--ocr-engine",
+        "default": "auto"
+      },
+      {
+        "id": "cloud_token",
+        "label": "云端 OCR token（云端/auto 用）",
+        "kind": "secret",
+        "env": "PADDLEOCR_AISTUDIO_TOKEN",
+        "required_when": {
+          "engine": [
+            "cloud"
+          ]
+        }
+      },
+      {
+        "id": "cloud_consent",
+        "label": "我同意：云端会上传文档",
+        "kind": "bool",
+        "flag": "--cloud-consent",
+        "required_when": {
+          "engine": [
+            "cloud"
+          ]
+        }
+      }
     ],
-    "knobs": ["--cloud-token"]
+    "knobs": [
+      "--cloud-token"
+    ]
   },
   {
     "id": "ocr_cross_check",
@@ -80,12 +128,36 @@
     "tradeoff": "更慢、需第二引擎（MinerU 本地或云端 token）；换来抓出两引擎的金额/日期识别分歧",
     "enforcement": "makeitdown --ocr-cross-check + verifier 代码路径；token 经子进程 env",
     "inputs": [
-      {"id": "cross_check_mode", "label": "校验器位置（本地/云端/双云端）", "kind": "select",
-       "options": ["cloud", "local", "auto"], "flag": "--cross-check-mode", "default": "cloud"},
-      {"id": "mineru_token", "label": "MinerU 云端 token（云端/双云端校验时需要）", "kind": "secret",
-       "env": "MINERU_API_TOKEN", "required_when": {"cross_check_mode": ["cloud", "auto"]}}
+      {
+        "id": "cross_check_mode",
+        "label": "校验器位置（本地/云端/双云端）",
+        "kind": "select",
+        "options": [
+          "cloud",
+          "local",
+          "auto"
+        ],
+        "flag": "--cross-check-mode",
+        "default": "cloud"
+      },
+      {
+        "id": "mineru_token",
+        "label": "MinerU 云端 token（云端/双云端校验时需要）",
+        "kind": "secret",
+        "env": "MINERU_API_TOKEN",
+        "required_when": {
+          "cross_check_mode": [
+            "cloud",
+            "auto"
+          ]
+        }
+      }
     ],
-    "sanctioned": {"ingest_flag": "--ocr-cross-check", "gui_control": "cross_check", "default_on": false}
+    "sanctioned": {
+      "ingest_flag": "--ocr-cross-check",
+      "gui_control": "cross_check",
+      "default_on": false
+    }
   },
   {
     "id": "structure_headings",
@@ -96,12 +168,35 @@
     "tradeoff": "需 LLM 凭证 + consent，会把正文外传给 LLM；换来更准的标题层级",
     "enforcement": "makeitdown --structure-headings 代码路径；LLM 凭证经子进程 env",
     "inputs": [
-      {"id": "llm_base_url", "label": "LLM base_url", "kind": "text", "env": "MAKEITDOWN_LLM_BASE_URL"},
-      {"id": "llm_model", "label": "LLM 模型名", "kind": "text", "env": "MAKEITDOWN_LLM_MODEL"},
-      {"id": "llm_api_key", "label": "LLM API key", "kind": "secret", "env": "MAKEITDOWN_LLM_API_KEY"}
+      {
+        "id": "llm_base_url",
+        "label": "LLM base_url",
+        "kind": "text",
+        "env": "MAKEITDOWN_LLM_BASE_URL"
+      },
+      {
+        "id": "llm_model",
+        "label": "LLM 模型名",
+        "kind": "text",
+        "env": "MAKEITDOWN_LLM_MODEL"
+      },
+      {
+        "id": "llm_api_key",
+        "label": "LLM API key",
+        "kind": "secret",
+        "env": "MAKEITDOWN_LLM_API_KEY"
+      }
     ],
-    "sanctioned": {"ingest_flag": "--structure-headings", "gui_control": "structure_headings", "default_on": false},
-    "knobs": ["--llm-base-url", "--llm-model", "--llm-api-key"]
+    "sanctioned": {
+      "ingest_flag": "--structure-headings",
+      "gui_control": "structure_headings",
+      "default_on": false
+    },
+    "knobs": [
+      "--llm-base-url",
+      "--llm-model",
+      "--llm-api-key"
+    ]
   },
   {
     "id": "rag_parent_context",
@@ -111,7 +206,12 @@
     "phase": "ingest",
     "tradeoff": "索引更细、体积更大、建索引更慢；换来命中片段带更完整上下文",
     "enforcement": "ingest 建索引前设 RAG_PARENT_CONTEXT，rag 子进程消费",
-    "sanctioned": {"ingest_flag": "--rag-parent-context", "env": "RAG_PARENT_CONTEXT", "gui_control": "parent_context", "default_on": false}
+    "sanctioned": {
+      "ingest_flag": "--rag-parent-context",
+      "env": "RAG_PARENT_CONTEXT",
+      "gui_control": "parent_context",
+      "default_on": false
+    }
   },
   {
     "id": "rag_install",
@@ -122,10 +222,29 @@
     "tradeoff": "默认开/强烈推荐——关闭 = 无 wiki×RAG 交叉验证、信任等级下降；后端只本地（local 内置 / 本地 ollama bge-m3）",
     "enforcement": "GUI 直接 subprocess 跑 install.py；后端经 case.json 由 rag.py 注入、索引期落盘 .rag/",
     "inputs": [
-      {"id": "embed_backend", "label": "embedding 后端（均本地）", "kind": "select",
-       "options": ["local", "ollama"], "env": "RAG_EMBED_BACKEND", "default": "local"},
-      {"id": "ollama_url", "label": "ollama 地址（仅 loopback）", "kind": "text",
-       "env": "RAG_OLLAMA_URL", "required_when": {"embed_backend": ["ollama"]}}
+      {
+        "id": "embed_backend",
+        "label": "embedding 后端（均本地）",
+        "kind": "select",
+        "options": [
+          "local",
+          "ollama"
+        ],
+        "env": "RAG_EMBED_BACKEND",
+        "default": "local",
+        "answer_persist": true
+      },
+      {
+        "id": "ollama_url",
+        "label": "ollama 地址（仅 loopback）",
+        "kind": "text",
+        "env": "RAG_OLLAMA_URL",
+        "required_when": {
+          "embed_backend": [
+            "ollama"
+          ]
+        }
+      }
     ]
   },
   {
@@ -137,8 +256,17 @@
     "tradeoff": "本地 makeitdown[local] 几百 MB、吃算力；云端免装但转换时上传",
     "enforcement": "GUI 直接 subprocess 跑 install.py --ocr <local|cloud>",
     "inputs": [
-      {"id": "ocr_pkg", "label": "OCR 安装方式", "kind": "select",
-       "options": ["local", "cloud"], "flag": "--ocr", "default": "cloud"}
+      {
+        "id": "ocr_pkg",
+        "label": "OCR 安装方式",
+        "kind": "select",
+        "options": [
+          "local",
+          "cloud"
+        ],
+        "flag": "--ocr",
+        "default": "cloud"
+      }
     ]
   },
   {
@@ -150,8 +278,12 @@
     "tradeoff": "开启 = '不编造' 在问答时被自动强制；不开则只靠 agent 自觉跑 lint answer",
     "enforcement": "GUI 勾选后往案件本地 .claude/settings.json 写 Stop hook（不碰用户全局）",
     "inputs": [
-      {"id": "enable_stop_hook", "label": "启用问答后闸门（写案件本地 settings）", "kind": "bool",
-       "flag": "--enable-stop-hook"}
+      {
+        "id": "enable_stop_hook",
+        "label": "启用问答后闸门（写案件本地 settings）",
+        "kind": "bool",
+        "flag": "--enable-stop-hook"
+      }
     ]
   },
   {
@@ -162,7 +294,12 @@
     "phase": "answer",
     "tradeoff": "查询期能力：更慢、需联网下载重排模型；由答案侧 RAG_RERANK 启用",
     "enforcement": "rag.py 读 case.json 注入 RAG_RERANK 到 rag 子进程（工具确定性注入，非委托）",
-    "sanctioned": {"env": "RAG_RERANK", "gui_control": "rerank", "default_on": false}
+    "sanctioned": {
+      "env": "RAG_RERANK",
+      "gui_control": "rerank",
+      "default_on": false,
+      "answer_persist": true
+    }
   },
   {
     "id": "rag_min_score",
@@ -172,9 +309,18 @@
     "phase": "answer",
     "tradeoff": "查询期能力：设太高会漏检、太低无效；由答案侧 RAG_MIN_SCORE 启用",
     "enforcement": "rag.py 读 case.json 注入 RAG_MIN_SCORE 到 rag 子进程（工具确定性注入，非委托）",
-    "sanctioned": {"env": "RAG_MIN_SCORE", "default_on": false},
+    "sanctioned": {
+      "env": "RAG_MIN_SCORE",
+      "default_on": false
+    },
     "inputs": [
-      {"id": "min_score", "label": "相关度下限 0~1", "kind": "text", "env": "RAG_MIN_SCORE"}
+      {
+        "id": "min_score",
+        "label": "相关度下限 0~1",
+        "kind": "text",
+        "env": "RAG_MIN_SCORE",
+        "answer_persist": true
+      }
     ]
   },
   {
@@ -185,7 +331,10 @@
     "phase": "ingest",
     "tradeoff": "不处置则完整性门保持非 0（未处置>0 即拦）；登记跳过需给非空原因",
     "enforcement": "GUI done 屏列出让用户裁决；写 log.md skip 条目；reconcile 门确定性拦截",
-    "sanctioned": {"gui_control": "unresolved_disposition", "default_on": false}
+    "sanctioned": {
+      "gui_control": "unresolved_disposition",
+      "default_on": false
+    }
   },
   {
     "id": "tuning_and_infra_knobs",
@@ -194,17 +343,46 @@
     "tier": "OUT",
     "rationale": "调优或基础设施旋钮，非'错一位就出事'的信任/隐私决策；暴露反而诱导放松安全阈值。登记于此仅为完备性账本，不进 GUI。",
     "knobs": [
-      "--keep-images", "--ocr-model", "--output", "-o", "--report", "--skip-existing",
-      "--strict", "--text-threshold", "--workers",
-      "--warn-cross-check-ratio", "--warn-garbled-ratio", "--warn-min-chars",
-      "--warn-min-chars-per-page", "--warn-min-confidence", "--warn-repeat-count",
-      "--llm-max-heading-len", "--llm-max-heading-ratio", "--llm-max-lines",
-      "--data-dir", "-k", "--exclude", "--filter", "--fix", "--json",
-      "--metadata-fields", "--no-recursive", "--show-parent", "--source-root",
-      "RAG_CHUNK_OVERLAP", "RAG_CHUNK_STRATEGY", "RAG_CHUNK_TOKENS", "RAG_DATA_DIR",
-      "RAG_EMBED_BATCH_SIZE", "RAG_EMBED_MODEL", "RAG_EMBED_MODEL_PATH",
-      "RAG_HYBRID_CANDIDATES", "RAG_METADATA_FIELDS", "RAG_PARENT_TOKENS",
-      "RAG_RERANK_MODEL", "RAG_RRF_K"
+      "--keep-images",
+      "--ocr-model",
+      "--output",
+      "-o",
+      "--report",
+      "--skip-existing",
+      "--strict",
+      "--text-threshold",
+      "--workers",
+      "--warn-cross-check-ratio",
+      "--warn-garbled-ratio",
+      "--warn-min-chars",
+      "--warn-min-chars-per-page",
+      "--warn-min-confidence",
+      "--warn-repeat-count",
+      "--llm-max-heading-len",
+      "--llm-max-heading-ratio",
+      "--llm-max-lines",
+      "--data-dir",
+      "-k",
+      "--exclude",
+      "--filter",
+      "--fix",
+      "--json",
+      "--metadata-fields",
+      "--no-recursive",
+      "--show-parent",
+      "--source-root",
+      "RAG_CHUNK_OVERLAP",
+      "RAG_CHUNK_STRATEGY",
+      "RAG_CHUNK_TOKENS",
+      "RAG_DATA_DIR",
+      "RAG_EMBED_BATCH_SIZE",
+      "RAG_EMBED_MODEL",
+      "RAG_EMBED_MODEL_PATH",
+      "RAG_HYBRID_CANDIDATES",
+      "RAG_METADATA_FIELDS",
+      "RAG_PARENT_TOKENS",
+      "RAG_RERANK_MODEL",
+      "RAG_RRF_K"
     ]
   },
   {

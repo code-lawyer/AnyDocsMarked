@@ -98,7 +98,10 @@ def _list_knobs_json() -> str:
     """本模块所有决策旋钮：CLI 标志（从 parser 派生）+ 读取的环境变量（自查源码）。
     供能力接线契约的完备性核对（每个旋钮须登记 FLOOR/CHOICE/OUT）。"""
     parser = _build_parser()
-    flags = sorted({opt for a in parser._actions for opt in a.option_strings})
+    # argparse 内建的 -h/--help 不是决策旋钮，在源头滤掉——让"什么算旋钮"只有一处定义，
+    # 消费方（能力契约完备性核对）不必再各维护一份忽略集。
+    builtins = {"-h", "--help"}
+    flags = sorted({opt for a in parser._actions for opt in a.option_strings} - builtins)
     return json.dumps({"module": "makeitdown", "flags": flags, "env": _read_env_names()},
                       ensure_ascii=False)
 

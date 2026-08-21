@@ -17,16 +17,14 @@ _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "lawiki" / "skill" / "lawiki" / "tools"))
 from capabilities import contract_knobs, load_capabilities  # noqa: E402
 
-# 通用 argparse 内建，不算决策旋钮。
-_IGNORE = {"--help", "-h", "--list-knobs"}
-
-
 def test_every_engine_knob_is_registered_in_contract():
+    # --list-knobs 与 argparse 内建 -h/--help 由各 reporter 在源头滤掉（"什么算旋钮"单处
+    # 定义），这里不再各维护一份忽略集。
     covered = contract_knobs(load_capabilities())
     reported: set[str] = set()
     for blob in (mk_knobs(), rag_knobs()):
         d = json.loads(blob)
         reported |= set(d["flags"]) | set(d["env"])
-    missing = sorted((reported - _IGNORE) - covered)
+    missing = sorted(reported - covered)
     assert not missing, (
         "以下引擎旋钮未在 capabilities.json 登记（须归类 FLOOR/CHOICE/OUT）：" + ", ".join(missing))

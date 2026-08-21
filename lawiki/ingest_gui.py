@@ -20,7 +20,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import ingest  # 须先于 capabilities：其导入把 skill/lawiki/tools 加进 sys.path
-from capabilities import build_gui_fields, load_capabilities
+from capabilities import answer_persist_map, build_gui_fields, load_capabilities
 
 _PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]\s+(.)\s+(.*)$")
 _GLYPH_STATUS = {"✓": "succeeded", "⚠": "warned", "✗": "failed",
@@ -76,15 +76,6 @@ def _cap_enabled(cap: dict, options: dict) -> bool:
     return bool(options.get(gc, False)) if gc else True
 
 
-def _secret_input_ids() -> set[str]:
-    ids: set[str] = set()
-    for cap in load_capabilities():
-        for inp in cap.get("inputs", []):
-            if inp.get("kind") == "secret":
-                ids.add(inp["id"])
-    return ids
-
-
 def build_ingest_argv(options: dict) -> list[str]:
     """从 options 拼 ingest.py 的 argv：遍历契约 phase=ingest 的 CHOICE，产出其启用的
     ingest 标志与 select/bool 类 input 标志。纯函数，GUI 与契约测试共用；能力清单只读
@@ -118,7 +109,8 @@ def build_ingest_env(options: dict) -> dict[str, str]:
         for inp in cap.get("inputs", []):
             name = inp.get("env")
             val = options.get(inp["id"])
-            if name and inp["kind"] in ("text", "secret") and val:
+            # 任何声明了 env 的 input（非 flag 型）→ 环境变量；不按 kind 硬编码。
+            if name and not inp.get("flag") and val:
                 env[name] = str(val)
     return env
 
@@ -153,13 +145,13 @@ def write_stop_hook(case: Path, skill_dir: Path) -> None:
 
 
 def build_case_config(options: dict) -> dict:
-    """把 answer 期非密选择持久化进 <case>/.anydocsmarked/case.json 的内容（rag.py 会读它
-    注入 env）。secret 绝不落盘。空/False 略去。"""
-    secrets = _secret_input_ids()
+    """answer 期非密选择 → 写进 <case>/.anydocsmarked/case.json 的内容（rag.py 读它注入 env）。
+    持久化键**从契约派生**（answer_persist_map，单一来源）；secret 天然不在其中、绝不落盘。
+    空/False 略去。"""
     cfg: dict = {}
-    for key in ("rerank", "min_score", "embed_backend"):
+    for key in answer_persist_map():
         val = options.get(key)
-        if key not in secrets and val not in (None, "", False):
+        if val not in (None, "", False):
             cfg[key] = val
     return cfg
 
@@ -247,8 +239,7 @@ class IngestApp(tk.Tk):
             if field["kind"] in ("toggle", "bool"):
                 self._field_vars[fid] = tk.BooleanVar(value=False)
             else:
-                default = ""
-                self._field_vars[fid] = tk.StringVar(value=default)
+                self._field_vars[fid] = tk.StringVar(value="")
         return self._field_vars[fid]
 
     def _render_cap_fields(self, parent: tk.Widget, cap: dict) -> None:

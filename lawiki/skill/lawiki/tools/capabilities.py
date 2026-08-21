@@ -126,14 +126,30 @@ def contract_knobs(caps: list[dict]) -> set[str]:
     return knobs
 
 
+def answer_persist_map() -> dict[str, str]:
+    """答案期需持久化到 <case>/.anydocsmarked/case.json 的选择 → rag.py 注入的 RAG_* 环境
+    变量。**从契约派生**（`answer_persist:true` 的 gui_control/input），单一来源——写入端
+    (build_case_config)、注入端 (rag.answer_env_from_case)、契约测试都读它，不各抄一份键表。
+    secret 输入不纳入（绝不落盘）。"""
+    m: dict[str, str] = {}
+    for cap in load_capabilities():
+        s = cap.get("sanctioned") or {}
+        if s.get("answer_persist") and s.get("gui_control") and s.get("env"):
+            m[s["gui_control"]] = s["env"]
+        for inp in cap.get("inputs", []):
+            if inp.get("answer_persist") and inp.get("env") and inp.get("kind") != "secret":
+                m[inp["id"]] = inp["env"]
+    return m
+
+
 def build_gui_fields(cap: dict) -> list[dict]:
     """把一个 CHOICE 展开成 GUI 该渲染的字段：开关（gui_control）+ 各 input。
     纯函数，GUI 与契约测试共用（契约测试据此断言每个开关/输入都在 GUI 可达）。"""
     fields: list[dict] = []
     gc = (cap.get("sanctioned") or {}).get("gui_control")
     if gc:
-        fields.append({"kind": "toggle", "id": gc,
-                       "label": cap.get("tradeoff") or cap.get("promise", "")})
+        # 开关标签用 promise（说明这个开关做什么）；tradeoff 由 GUI 另起 ⚖ 一行呈现，不重复。
+        fields.append({"kind": "toggle", "id": gc, "label": cap.get("promise", "")})
     for inp in cap.get("inputs", []):
         fields.append({"kind": inp["kind"], "id": inp["id"], "label": inp["label"],
                        "options": inp.get("options"), "required_when": inp.get("required_when")})

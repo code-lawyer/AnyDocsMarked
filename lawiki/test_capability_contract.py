@@ -21,7 +21,7 @@ sys.path.insert(0, str(_HERE / "skill" / "lawiki" / "tools"))
 import ingest  # noqa: E402
 import ingest_gui  # noqa: E402
 import install  # noqa: E402
-from capabilities import build_gui_fields, load_capabilities  # noqa: E402
+from capabilities import answer_persist_map, build_gui_fields, load_capabilities  # noqa: E402
 
 _INGEST_SRC = (_HERE / "ingest.py").read_text(encoding="utf-8")
 _SETUP_MD = (_HERE / "skill" / "lawiki" / "references" / "setup.md").read_text(encoding="utf-8")
@@ -64,7 +64,9 @@ class CapabilityContractTests(unittest.TestCase):
                     self.fail(f"FLOOR {cid} 未登记：既无 lawiki 侧接线断言，也未标为跨模块委托")
 
     def test_enforcement_present_and_non_agent(self):
-        # 每个 FLOOR/CHOICE 必须点名确定性执行点，且不得委托 agent。
+        # 每个 FLOOR/CHOICE 必须点名确定性执行点，且不得委托 agent。刻意用最简的亮线规则：
+        # enforcement **不得出现 "agent" 一词**——想说"非委托"就直接写具体机制（代码门/
+        # 工具注入/文件写入），别提 agent。宁可粗一点也要不可被绕过。
         for cap in self.caps:
             if cap["tier"] == "OUT":
                 continue
@@ -107,11 +109,12 @@ class CapabilityContractTests(unittest.TestCase):
                 self.assertIn(env, _DOCS, f"答案侧 CHOICE {cap['id']} 的 {env} 未在文档出现")
 
     def test_secret_inputs_never_persisted(self):
-        # build_case_config 永不写入任何 secret 类输入。
-        persisted_keys = {"rerank", "min_score", "embed_backend"}
+        # 持久化键从契约派生（与 build_case_config / rag.py 同一来源）；secret 绝不在其中。
+        persisted_keys = set(answer_persist_map())
         secret_ids = {inp["id"] for cap in self.caps for inp in cap.get("inputs", [])
                       if inp.get("kind") == "secret"}
         self.assertTrue(secret_ids)  # 契约确实有 secret（否则断言空转）
+        self.assertTrue(persisted_keys)  # 确实有持久化键（否则断言空转）
         self.assertEqual(secret_ids & persisted_keys, set(),
                          "有 secret 输入落进了持久化键集合")
 

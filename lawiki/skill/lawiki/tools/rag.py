@@ -109,23 +109,28 @@ def _rag_base() -> list[str]:
 def answer_env_from_case(case: Path) -> dict[str, str]:
     """把用户在 GUI 选的 answer 期旋钮（持久化在 <case>/.anydocsmarked/case.json）映射成
     rag-retriever 认的 RAG_* 环境变量。这是"选了必须硬执行、不委托 agent"的兑现点：
-    _run_rag 每次 spawn 前调它，任何工具消费 RAG 都自动带上用户的选择。best-effort：
-    无配置/读不到/解析失败 → {}，绝不抛异常。仅非密项（rerank/min_score/embed_backend）。"""
-    cfg_path = case / ".anydocsmarked" / "case.json"
+    _run_rag 每次 spawn 前调它，任何工具消费 RAG 都自动带上用户的选择。
+
+    键→env 的映射**从能力契约派生**（answer_persist_map，与 GUI 写入端同一来源，不各抄）。
+    best-effort：无配置/读不到/契约不可用 → {}，绝不抛异常、不阻断问答。布尔 True 视为
+    "启用"→ RAG_* 取 'local'（rerank 语义）；其余取字符串值。"""
     try:
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg = json.loads((case / ".anydocsmarked" / "case.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not isinstance(cfg, dict):
         return {}
+    try:
+        from capabilities import answer_persist_map
+        mapping = answer_persist_map()
+    except Exception:  # noqa: BLE001  契约不可用则不注入，问答照常（仅失去用户选择）
+        return {}
     env: dict[str, str] = {}
-    if cfg.get("rerank") is True:
-        env["RAG_RERANK"] = "local"
-    if isinstance(cfg.get("min_score"), (int, float)) and not isinstance(cfg.get("min_score"), bool):
-        env["RAG_MIN_SCORE"] = str(cfg["min_score"])
-    backend = cfg.get("embed_backend")
-    if isinstance(backend, str) and backend:
-        env["RAG_EMBED_BACKEND"] = backend
+    for key, name in mapping.items():
+        val = cfg.get(key)
+        if val in (None, "", False):
+            continue
+        env[name] = "local" if val is True else str(val)
     return env
 
 
