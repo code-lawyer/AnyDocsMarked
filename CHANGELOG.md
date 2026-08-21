@@ -11,6 +11,7 @@
 
 ### Added
 
+- **三阶段决策全量收进 GUI + 决策账本可证明完备**:摄入 GUI 现按契约(capabilities.json)渲染 install/ingest/answer 三阶段每个可选决策(OCR 引擎/上传同意/token、双 OCR 互校模式+MinerU token、结构重建 LLM 凭证、embedding 后端、问答后闸门、rerank/min_score),并把每个决策**确定性执行、不委托 agent**:token/凭证只经子进程环境变量(不落盘)、答案期选择写案件本地 `case.json`(由 `rag.py` 问答时注入)、stop_hook 写案件本地 settings(不碰用户全局)。契约新增 `phase=install`/`inputs`/`enforcement` 字段,契约测试断言"每个 enforcement 非空且非 agent""每个 CHOICE 在 GUI 可达""secret 绝不落盘"。makeitdown/rag 新增 `--list-knobs` 自报,跨模块用例断言**三模块每个 env/flag 都已登记 FLOOR/CHOICE/OUT**——新增一个未登记旋钮即红,杜绝决策逃出账本。
 - **能力接线契约**（`lawiki/skill/lawiki/capabilities.json` + `tools/capabilities.py`):把"承诺相关能力 → sanctioned 路径接线要求"做成单一真值来源(FLOOR 必开 / CHOICE 让人选 / OUT 明确排除),ingest/GUI/install 各自读契约接线,并新增契约测试 `test_capability_contract.py` 断言接线成立——把过去不可见的编排/GUI/安装接缝变成 CI 看得见的门。首批修复:① 双 OCR 互校(`--ocr-cross-check`)接入 ingest 透传 + GUI「高级」开关;② `ocr_rotate.py` 旋转纠偏从死代码接入 OCR 路径(仅对低置信扫描件重探,限成本);③ `install.py` 新增问答后闸门(stop_hook)就绪检测与告警(不侵入用户 settings);④ `--structure-headings` 与 rag `parent_context`(索引期)经 GUI 高级区可达;⑤ rag `rerank`/`min_score`(查询期)在 setup.md/SKILL 文档化为答案侧可选加强。
 - 摄入引擎 `lawiki/ingest.py`（仅标准库,跨平台):单入口编排 `_setup_case → init_case → makeitdown 转换 → rag 建索引 → 源级对账 → 确定性完整性门`,产出合并 `ingest-report.json` + 单退出码(0 全通过 / 1 转换硬失败 / 2 前置或环境缺失 / 3 完整性门未过)。门/退出码/consent 逻辑为单一来源,GUI 直接复用本模块函数,不另写门逻辑。
 - 图形摄入前端 `lawiki/ingest_gui.py`(tkinter,仅标准库):文件夹选择 + 本地/云端 OCR 权衡说明 + token/consent + 实时进度条 + 完成摘要与下一步。薄前端 shell out 到 `ingest.py`,不重实现任何门/退出码/consent;token 仅经子进程环境变量注入,**绝不落盘**。无桌面环境明确中文报错并以专用退出码(3)退出,绝不静默降级无头。

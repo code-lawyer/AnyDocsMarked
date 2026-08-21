@@ -82,8 +82,6 @@ def test_raw_source_reaches_retrieval_and_cited_answer_gate(tmp_path, monkeypatc
         embed_backend="local",
         embed_model="acceptance-fake",
         ollama_url="",
-        openai_base_url="",
-        openai_api_key="",
         data_dir=case / ".rag",
         chunk_tokens=384,
         chunk_overlap=50,

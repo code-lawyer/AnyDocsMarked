@@ -194,8 +194,17 @@ lawiki 后驱动，**不在引擎内**；wiki 的 `lint check` 也在建 wiki �
 ### GUI 用法（唯一的用户流程）
 
 用户把资料放在任意一个文件夹里，只需把该文件夹路径告诉 agent。agent 后台启动
-`python ingest_gui.py "<路径>"`；窗口里：①确认「把该文件夹下的资料归入子目录
-原始资料/」②选本地/云端（云端可点「去申请」贴 token）③看进度条④完成弹窗。
-底层跑的是和引擎完全一样的门禁；token 仅本次运行经环境变量传入、不写盘；原件被
-移动到 `原始资料/` 后即视为不可变来源层。无桌面环境下 GUI 会以退出码 3 明确报错，
-不会静默改跑无头。
+`python ingest_gui.py "<路径>"`。窗口按能力接线契约（`capabilities.json`）**把每个可选
+决策都摆给用户拍板**，分三阶段——不让本地 agent 静默替用户决定：
+
+- **① 环境与闸门（install）**：embedding 后端（local 内置 / 本地 ollama）、OCR 安装方式、
+  是否启用问答后闸门 stop_hook。
+- **② OCR + ③ 高级（ingest）**：本地/云端 OCR + token + 上传同意；双 OCR 互校（模式含
+  **双云端** + MinerU token）；结构重建（LLM 凭证）；parent-context。
+- **④ 问答设置（answer）**：rerank / min_score（问答时生效）。
+
+每个决策**选了就有确定性执行、不委托 agent**：token/凭证**仅本次运行经子进程环境变量、
+绝不写盘**；答案期选择写**案件本地** `.anydocsmarked/case.json`（问答时由 `rag.py` 注入
+`RAG_*`）；stop_hook 写**案件本地** `.claude/settings.json`（绝不碰用户全局）。底层跑的是
+和引擎完全一样的门禁；原件被移动到 `原始资料/` 后即视为不可变来源层。无桌面环境下 GUI
+以退出码 3 明确报错，不会静默改跑无头。
