@@ -163,6 +163,42 @@ class WriteCaseConfigTests(unittest.TestCase):
             self.assertFalse((case / ".anydocsmarked" / "case.json").exists())
 
 
+class BuildInstallArgvTests(unittest.TestCase):
+    def test_ocr_pkg_becomes_ocr_flag(self):
+        self.assertEqual(g.build_install_argv({"ocr_pkg": "local"}), ["--ocr", "local"])
+
+    def test_empty_when_no_install_choice(self):
+        self.assertEqual(g.build_install_argv({}), [])
+
+
+class UnresolvedDispositionTests(unittest.TestCase):
+    def test_extracts_per_file_paths_not_summary(self):
+        report = {"stages": {"source_reconcile": {"unresolved": [
+            "[未处置源级遗漏] 原始资料/合同.pdf",
+            "[跳过无原因] 原始资料/笔录.doc",
+            "[源多于已处理] 原始资料/ 有 5 个文件，report.json 仅记录 3 个——请重跑。",
+        ]}}}
+        self.assertEqual(g.unresolved_source_files(report),
+                         ["原始资料/合同.pdf", "原始资料/笔录.doc"])
+
+    def test_empty_report_yields_none(self):
+        self.assertEqual(g.unresolved_source_files({}), [])
+
+    def test_append_skip_log_writes_reconcile_parseable_entry(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            (case / "wiki").mkdir()
+            g.append_skip_log(case, "原始资料/合同.pdf", "同一扫描件的重复件")
+            text = (case / "wiki" / "log.md").read_text(encoding="utf-8")
+            self.assertIn("skip | 原始资料/合同.pdf", text)
+            self.assertIn("同一扫描件的重复件", text)
+            # 真被 reconcile 的解析器视为"已登记跳过（带原因）"
+            sys.path.insert(0, str(Path(g.__file__).parent / "skill" / "lawiki" / "lint"))
+            from lint import _load_skips
+            skips = _load_skips(case)
+            self.assertTrue(skips.get("原始资料/合同.pdf"))
+
+
 class WriteStopHookTests(unittest.TestCase):
     def test_writes_case_local_stop_hook(self):
         with tempfile.TemporaryDirectory() as td:

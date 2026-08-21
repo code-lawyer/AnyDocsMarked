@@ -16,6 +16,7 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
+from datetime import date
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -76,12 +77,12 @@ def _cap_enabled(cap: dict, options: dict) -> bool:
     return bool(options.get(gc, False)) if gc else True
 
 
-def build_ingest_argv(options: dict) -> list[str]:
-    """从 options 拼 ingest.py 的 argv：遍历契约 phase=ingest 的 CHOICE，产出其启用的
-    ingest 标志与 select/bool 类 input 标志。纯函数，GUI 与契约测试共用；能力清单只读
-    capabilities.json。text/secret 类 input 走环境变量（build_ingest_env），不进 argv。"""
+def _flags_for(phase: str, options: dict) -> list[str]:
+    """契约驱动地把某一 phase 里启用的 CHOICE 拼成 CLI 标志：sanctioned.ingest_flag +
+    各 select/bool 类 input 的 flag。text/secret 类走环境变量，不进 argv。ingest 与 install
+    共用同一机制。"""
     argv: list[str] = []
-    for cap in _caps_by_phase("ingest"):
+    for cap in _caps_by_phase(phase):
         if not _cap_enabled(cap, options):
             continue
         s = cap.get("sanctioned") or {}
@@ -97,6 +98,16 @@ def build_ingest_argv(options: dict) -> list[str]:
             elif inp["kind"] == "bool" and val:
                 argv.append(flag)
     return argv
+
+
+def build_ingest_argv(options: dict) -> list[str]:
+    """ingest.py 的标志（契约 phase=ingest）。纯函数，GUI 与契约测试共用。"""
+    return _flags_for("ingest", options)
+
+
+def build_install_argv(options: dict) -> list[str]:
+    """install.py 的标志（契约 phase=install，如 --ocr <local|cloud>）。"""
+    return _flags_for("install", options)
 
 
 def build_ingest_env(options: dict) -> dict[str, str]:
@@ -124,6 +135,32 @@ def write_case_config(case: Path, options: dict) -> None:
     d = case / ".anydocsmarked"
     d.mkdir(parents=True, exist_ok=True)
     (d / "case.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+_UNRESOLVED_FILE_RE = re.compile(r"^\[(?:未处置源级遗漏|跳过无原因)\]\s+(原始资料/\S.*)$")
+
+
+def unresolved_source_files(report: dict) -> list[str]:
+    """从 ingest-report 的源级对账里取出**逐个未处置源文件**的路径（原始资料/…），供 done
+    屏让用户裁决。"[源多于已处理]" 那类是汇总提示、非单文件，排除。"""
+    unresolved = (report.get("stages", {}).get("source_reconcile", {}) or {}).get("unresolved", [])
+    out: list[str] = []
+    for line in unresolved:
+        m = _UNRESOLVED_FILE_RE.match(line)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def append_skip_log(case: Path, source_rel: str, reason: str) -> None:
+    """在 wiki/log.md 追加一条源级跳过登记（reconcile/lint 认的格式），把"未处置"变成
+    "已登记跳过（带原因）"——完整性门随即放行该文件。reason 必须非空。"""
+    reason = reason.strip() or "（用户在 GUI 登记跳过，未填原因）"
+    wiki = case / "wiki"
+    wiki.mkdir(parents=True, exist_ok=True)
+    entry = f"\n## [{date.today().isoformat()}] skip | {source_rel}\n- 原因：{reason}\n"
+    with (wiki / "log.md").open("a", encoding="utf-8") as fh:
+        fh.write(entry)
 
 
 def write_stop_hook(case: Path, skill_dir: Path) -> None:
@@ -227,10 +264,48 @@ class IngestApp(tk.Tk):
         self._refresh_cloud_box()
 
         self._build_section("⓪ 环境与闸门（可选）", _caps_by_phase("install"))
+        tk.Button(self._container, text="安装/检查环境",
+                  command=self._on_install).pack(anchor="w")
         self._build_advanced_box()
 
         tk.Button(self._container, text="开始摄入 ▶", font=("", 12, "bold"),
                   command=self._on_start).pack(pady=16)
+
+    def _on_install(self) -> None:
+        """按 install 期选择直接跑 install.py（GUI 确定性执行，不叫 agent 跑）。"""
+        argv = build_install_argv(self._collect_options())
+        if not argv:
+            messagebox.showinfo("安装环境", "未选择需安装项（在「⓪ 环境与闸门」里选 OCR 安装方式）。")
+            return
+        if not messagebox.askyesno("安装/检查环境",
+                                   f"将运行：install.py {' '.join(argv)}\n（可能下载依赖、耗时）。继续？"):
+            return
+        install_py = Path(__file__).resolve().parent / "install.py"
+        self._run_stream_screen(
+            "正在安装环境…（勿关窗）", [sys.executable, str(install_py), *argv], "install_done")
+
+    def _run_stream_screen(self, title: str, argv: list[str], done_kind: str) -> None:
+        """通用：新屏跑一条命令、把输出流到日志框，完成后经 _pump 的 done_kind 分流。"""
+        self._clear()
+        tk.Label(self._container, text=title, font=("", 12, "bold")).pack(anchor="w")
+        self._logbox = tk.Text(self._container, height=18, wrap="none")
+        self._logbox.pack(fill="both", expand=True, pady=8)
+        self._thread = threading.Thread(target=self._stream_worker, args=(argv, done_kind), daemon=True)
+        self._thread.start()
+        self.after(150, self._pump)
+
+    def _stream_worker(self, argv: list[str], done_kind: str) -> None:
+        env = os.environ.copy(); env.setdefault("PYTHONUTF8", "1")
+        try:
+            proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, encoding="utf-8", errors="replace", bufsize=1, env=env)
+        except Exception as e:  # noqa: BLE001
+            self._q.put(("error", str(e))); return
+        self._proc = proc
+        for line in proc.stdout:  # type: ignore[union-attr]
+            self._q.put(("line", line.rstrip("\n")))
+        proc.wait()
+        self._q.put((done_kind, proc.returncode))
 
     def _field_var(self, field: dict) -> tk.Variable:
         """按字段 id 复用/新建 tk 变量（bool→Boolean，其余→String，select 带默认值）。"""
@@ -376,6 +451,13 @@ class IngestApp(tk.Tk):
         # 全程 UTF-8 才能对齐。
         env.setdefault("PYTHONUTF8", "1")
         env.update(build_ingest_env(options))  # cross-check/OCR/LLM 的 token 与凭证
+        # embedding 后端也在建索引时生效（与问答同一后端，否则模型不一致会被拒）——复用
+        # rag.py 的同一映射从刚写的 case.json 派生，注入 ingest 子进程。
+        try:
+            from rag import answer_env_from_case
+            env.update(answer_env_from_case(case))
+        except Exception:  # noqa: BLE001  取不到就用默认后端，不阻断摄入
+            pass
         try:
             proc = subprocess.Popen(
                 argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -396,11 +478,17 @@ class IngestApp(tk.Tk):
                     self._logbox.insert("end", payload + "\n")
                     self._logbox.see("end")
                     prog = parse_progress_line(payload)
-                    if prog:
+                    if prog and hasattr(self, "_bar"):  # install 流没有进度条
                         self._bar.config(maximum=prog["total"], value=prog["done"])
                         self._stat.config(text=f"{prog['done']}/{prog['total']} · {prog['path']}")
                 elif kind == "error":
                     messagebox.showerror("启动失败", payload)
+                    self._build_choice_screen(); return
+                elif kind == "install_done":
+                    ok = payload == 0
+                    (messagebox.showinfo if ok else messagebox.showwarning)(
+                        "安装环境", "环境安装/检查完成。" if ok else
+                        f"install.py 退出码 {payload}——部分组件可能未装好，详见日志。")
                     self._build_choice_screen(); return
                 elif kind == "done":
                     self._build_done_screen(payload); return
@@ -425,9 +513,18 @@ class IngestApp(tk.Tk):
         else:
             summary = f"引擎退出码 {exit_code}，但未找到 ingest-report.json（可能前置失败）。"
         tk.Label(self._container, text="摄入结束", font=("", 13, "bold")).pack(anchor="w")
-        box = tk.Text(self._container, height=16, wrap="word")
+        box = tk.Text(self._container, height=10, wrap="word")
         box.insert("1.0", summary); box.config(state="disabled")
         box.pack(fill="both", expand=True, pady=8)
+
+        report = {}
+        if report_path and report_path.is_file():
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                report = {}
+        self._build_disposition_box(unresolved_source_files(report))
+
         row = tk.Frame(self._container); row.pack(fill="x")
         if report_path and report_path.is_file():
             tk.Button(row, text="打开报告位置",
@@ -439,6 +536,35 @@ class IngestApp(tk.Tk):
                                    "有需要处理的项，详见窗口内摘要（未静默放过）。")
         else:
             messagebox.showinfo("完成", "摄入完成、完整性门通过。可让 agent 继续建 wiki。")
+
+    def _build_disposition_box(self, files: list[str]) -> None:
+        """未处置源文件逐个裁决：填原因→登记跳过（写 log.md，reconcile 随即放行），或重新
+        摄入（补转）。未处置>0 时完整性门本就非 0——这里把裁决权确定性地交给用户。"""
+        if not files:
+            return
+        tk.Label(self._container, text=f"未处置源文件（{len(files)}）——请逐个裁决：",
+                 font=("", 11, "bold"), fg="#a60").pack(anchor="w", pady=(8, 0))
+        self._disp_reason: dict[str, tk.StringVar] = {}
+        for rel in files:
+            r = tk.Frame(self._container); r.pack(fill="x", pady=2)
+            tk.Label(r, text=rel, width=34, anchor="w").pack(side="left")
+            var = tk.StringVar(value="")
+            self._disp_reason[rel] = var
+            tk.Entry(r, textvariable=var, width=24).pack(side="left")
+            tk.Label(r, text="←填跳过原因", fg="#888").pack(side="left", padx=2)
+            tk.Button(r, text="登记跳过",
+                      command=lambda x=rel: self._on_register_skip(x)).pack(side="left", padx=4)
+
+    def _on_register_skip(self, rel: str) -> None:
+        reason = self._disp_reason[rel].get().strip()
+        if not reason:
+            messagebox.showwarning("需要原因", "登记跳过必须写非空原因（否则 reconcile 仍视为未处置）。")
+            return
+        try:
+            append_skip_log(self.case_dir, rel, reason)
+        except OSError as e:
+            messagebox.showerror("写入失败", str(e)); return
+        messagebox.showinfo("已登记", f"{rel} 已登记跳过。重跑源级对账即放行；可点「重新摄入」复核。")
 
 
 def main(argv: list[str] | None = None) -> int:

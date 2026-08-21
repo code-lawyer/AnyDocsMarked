@@ -277,14 +277,10 @@
     "phase": "install",
     "tradeoff": "开启 = '不编造' 在问答时被自动强制；不开则只靠 agent 自觉跑 lint answer",
     "enforcement": "GUI 勾选后往案件本地 .claude/settings.json 写 Stop hook（不碰用户全局）",
-    "inputs": [
-      {
-        "id": "enable_stop_hook",
-        "label": "启用问答后闸门（写案件本地 settings）",
-        "kind": "bool",
-        "flag": "--enable-stop-hook"
-      }
-    ]
+    "sanctioned": {
+      "gui_control": "enable_stop_hook",
+      "default_on": false
+    }
   },
   {
     "id": "rag_rerank",
