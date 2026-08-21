@@ -148,5 +148,41 @@ class BuildCaseConfigTests(unittest.TestCase):
         self.assertEqual(cfg, {})
 
 
+class WriteCaseConfigTests(unittest.TestCase):
+    def test_writes_answer_selections(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            g.write_case_config(case, {"rerank": True, "min_score": "0.3", "mineru_token": "S"})
+            data = json.loads((case / ".anydocsmarked" / "case.json").read_text(encoding="utf-8"))
+            self.assertEqual(data, {"rerank": True, "min_score": "0.3"})  # secret 不落盘
+
+    def test_no_file_when_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            g.write_case_config(case, {"rerank": False})
+            self.assertFalse((case / ".anydocsmarked" / "case.json").exists())
+
+
+class WriteStopHookTests(unittest.TestCase):
+    def test_writes_case_local_stop_hook(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            g.write_stop_hook(case, Path("/skills/lawiki"))
+            settings = json.loads((case / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            cmds = [h["command"] for grp in settings["hooks"]["Stop"] for h in grp["hooks"]]
+            self.assertTrue(any("stop_hook.py" in c for c in cmds))
+
+    def test_merges_into_existing_settings(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            d = case / ".claude"
+            d.mkdir()
+            (d / "settings.json").write_text(json.dumps({"other": 1}), encoding="utf-8")
+            g.write_stop_hook(case, Path("/skills/lawiki"))
+            settings = json.loads((d / "settings.json").read_text(encoding="utf-8"))
+            self.assertEqual(settings["other"], 1)  # 不覆盖既有键
+            self.assertIn("Stop", settings["hooks"])
+
+
 if __name__ == "__main__":
     unittest.main()

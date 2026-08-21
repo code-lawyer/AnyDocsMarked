@@ -20,7 +20,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import ingest  # 须先于 capabilities：其导入把 skill/lawiki/tools 加进 sys.path
-from capabilities import load_capabilities
+from capabilities import build_gui_fields, load_capabilities
 
 _PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]\s+(.)\s+(.*)$")
 _GLYPH_STATUS = {"✓": "succeeded", "⚠": "warned", "✗": "failed",
@@ -123,6 +123,35 @@ def build_ingest_env(options: dict) -> dict[str, str]:
     return env
 
 
+def write_case_config(case: Path, options: dict) -> None:
+    """把 answer 期非密选择写进 <case>/.anydocsmarked/case.json（rag.py 读它注入 env）。
+    没有可持久化项时不建文件。secret 由 build_case_config 排除、绝不落盘。"""
+    cfg = build_case_config(options)
+    if not cfg:
+        return
+    d = case / ".anydocsmarked"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "case.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def write_stop_hook(case: Path, skill_dir: Path) -> None:
+    """在**案件本地** <case>/.claude/settings.json 挂 Stop hook（问答后闸门）。合并既有
+    settings、不覆盖其它键；绝不碰用户全局 settings。"""
+    d = case / ".claude"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / "settings.json"
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(settings, dict):
+            settings = {}
+    except (OSError, ValueError):
+        settings = {}
+    hooks = settings.setdefault("hooks", {})
+    cmd = f'python "{(skill_dir / "lint" / "stop_hook.py").as_posix()}"'
+    hooks["Stop"] = [{"hooks": [{"type": "command", "command": cmd}]}]
+    path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def build_case_config(options: dict) -> dict:
     """把 answer 期非密选择持久化进 <case>/.anydocsmarked/case.json 的内容（rag.py 会读它
     注入 env）。secret 绝不落盘。空/False 略去。"""
@@ -169,9 +198,8 @@ class IngestApp(tk.Tk):
         self.engine = tk.StringVar(value=cfg["engine"])
         self.consent = tk.BooleanVar(value=False)
         self.token_var = tk.StringVar(value="")
-        # 契约中 phase=ingest 的 CHOICE 能力 → 每个一个开关（默认关，可见可选）。
-        self._choice_vars = {c["sanctioned"]["gui_control"]: tk.BooleanVar(value=False)
-                             for c in choice_controls()}
+        # 契约驱动的所有 GUI 字段变量（开关 + 各 input），键为字段 id。渲染时按需建。
+        self._field_vars: dict[str, tk.Variable] = {}
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
         self._q: queue.Queue = queue.Queue()
@@ -206,25 +234,56 @@ class IngestApp(tk.Tk):
         self._cloud_box.pack(fill="x", pady=8)
         self._refresh_cloud_box()
 
+        self._build_section("⓪ 环境与闸门（可选）", _caps_by_phase("install"))
         self._build_advanced_box()
 
         tk.Button(self._container, text="开始摄入 ▶", font=("", 12, "bold"),
                   command=self._on_start).pack(pady=16)
 
-    def _build_advanced_box(self) -> None:
-        """③ 高级（可选加强）：为契约中每个 phase=ingest 的 CHOICE 能力渲染一个开关 +
-        权衡说明。默认全关但可见——把"容易被静默跳过的加强项"摆到人面前，由用户拍板。"""
-        caps = choice_controls()
+    def _field_var(self, field: dict) -> tk.Variable:
+        """按字段 id 复用/新建 tk 变量（bool→Boolean，其余→String，select 带默认值）。"""
+        fid = field["id"]
+        if fid not in self._field_vars:
+            if field["kind"] in ("toggle", "bool"):
+                self._field_vars[fid] = tk.BooleanVar(value=False)
+            else:
+                default = ""
+                self._field_vars[fid] = tk.StringVar(value=default)
+        return self._field_vars[fid]
+
+    def _render_cap_fields(self, parent: tk.Widget, cap: dict) -> None:
+        """契约驱动地渲染一个 CHOICE 的开关 + 各 input（build_gui_fields 单一来源）。
+        text/secret→输入框（secret 掩码）；select→下拉；bool/toggle→勾选框。"""
+        for field in build_gui_fields(cap):
+            var = self._field_var(field)
+            kind = field["kind"]
+            if kind in ("toggle", "bool"):
+                tk.Checkbutton(parent, text=field["label"], variable=var).pack(anchor="w")
+            else:
+                row = tk.Frame(parent); row.pack(fill="x", padx=16)
+                tk.Label(row, text=field["label"] + "：").pack(side="left")
+                if kind == "select":
+                    var.set(var.get() or (field.get("options") or [""])[0])
+                    ttk.Combobox(row, textvariable=var, values=field.get("options") or [],
+                                 state="readonly", width=16).pack(side="left")
+                else:
+                    tk.Entry(row, textvariable=var, width=40,
+                             show="•" if kind == "secret" else "").pack(side="left")
+
+    def _build_section(self, title: str, caps: list[dict]) -> None:
         if not caps:
             return
-        tk.Label(self._container, text="③ 高级（可选加强，默认关）",
-                 font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
+        tk.Label(self._container, text=title, font=("", 12, "bold")).pack(anchor="w", pady=(12, 0))
         for cap in caps:
-            gc = cap["sanctioned"]["gui_control"]
-            tk.Checkbutton(self._container, text=cap["promise"],
-                           variable=self._choice_vars[gc]).pack(anchor="w")
-            tk.Message(self._container, text="⚖ " + cap["tradeoff"], width=580,
+            tk.Message(self._container, text="⚖ " + cap.get("tradeoff", ""), width=580,
                        fg="#666").pack(anchor="w")
+            self._render_cap_fields(self._container, cap)
+
+    def _build_advanced_box(self) -> None:
+        """③ 高级（可选加强，默认关）——契约中 phase=ingest 的 CHOICE（含各自的 token/凭证
+        输入）。把"容易被静默跳过的加强项"连同它的必需输入一起摆到人面前。"""
+        self._build_section("③ 高级（可选加强，默认关）", choice_controls())
+        self._build_section("④ 问答设置（answer 期，问答时生效）", _caps_by_phase("answer"))
 
     def _refresh_cloud_box(self) -> None:
         for w in self._cloud_box.winfo_children():
@@ -290,27 +349,42 @@ class IngestApp(tk.Tk):
         self._stat.pack(anchor="w")
         self._logbox = tk.Text(self._container, height=16, wrap="none")
         self._logbox.pack(fill="both", expand=True, pady=8)
-        # tk.Variable.get() 走 Tcl，只能在主线程调用；在此（主线程）快照成普通
-        # Python 值（含每个 CHOICE 开关）再传给 worker 线程，worker 绝不碰 self.*.get()。
-        options = {"engine": self.engine.get(), "cloud_consent": self.consent.get()}
-        options.update({gc: var.get() for gc, var in self._choice_vars.items()})
-        token = self.token_var.get().strip()
-        self._thread = threading.Thread(target=self._worker, args=(options, token), daemon=True)
+        # tk.Variable.get() 走 Tcl，只能在主线程调用；在此（主线程）快照成普通 Python
+        # 值再传给 worker 线程，worker 绝不碰 self.*.get()。
+        options = self._collect_options()
+        self._thread = threading.Thread(target=self._worker, args=(options,), daemon=True)
         self._thread.start()
         self.after(150, self._pump)
 
-    def _worker(self, options: dict, token: str) -> None:
-        # 与 agent 完全相同的 CLI；token 只经子进程环境变量注入，不落盘。
+    def _collect_options(self) -> dict:
+        """把所有 GUI 输入快照成普通 Python dict（供 build_ingest_argv/env/case_config 消费）。
+        OCR 引擎/consent/token 走既有控件；其余契约字段走 _field_vars。"""
+        opts: dict = {"engine": self.engine.get(), "cloud_consent": bool(self.consent.get()),
+                      "cloud_token": self.token_var.get().strip()}
+        for fid, var in self._field_vars.items():
+            val = var.get()
+            opts[fid] = val.strip() if isinstance(val, str) else val
+        return opts
+
+    def _worker(self, options: dict) -> None:
+        # 与 agent 完全相同的 CLI；token/凭证只经子进程环境变量注入，不落盘。
         ingest_py = Path(__file__).resolve().parent / "ingest.py"
-        argv = [sys.executable, str(ingest_py), str(self.case_dir),
-                *build_ingest_argv(options)]
+        case = self.case_dir
+        # answer 期选择持久化进案件本地 case.json（rag.py 问答时读它注入 env，非委托 agent）；
+        # 勾了后闸门则写案件本地 .claude/settings.json。二者确定性执行、绝不碰用户全局。
+        try:
+            write_case_config(case, options)
+            if options.get("enable_stop_hook"):
+                write_stop_hook(case, Path(__file__).resolve().parent / "skill" / "lawiki")
+        except OSError as e:
+            self._q.put(("error", f"写案件配置失败：{e}")); return
+        argv = [sys.executable, str(ingest_py), str(case), *build_ingest_argv(options)]
         env = os.environ.copy()
         # makeitdown 等子进程把进度符号（✓⚠✗=→）写到 stderr；GUI 按 UTF-8 解码
         # 管道，子进程若落到本地 GBK locale 会乱码甚至 UnicodeEncodeError，逼它
         # 全程 UTF-8 才能对齐。
         env.setdefault("PYTHONUTF8", "1")
-        if token:
-            env["PADDLEOCR_AISTUDIO_TOKEN"] = token
+        env.update(build_ingest_env(options))  # cross-check/OCR/LLM 的 token 与凭证
         try:
             proc = subprocess.Popen(
                 argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
