@@ -19,7 +19,7 @@ _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "capabilities.json"
 _OWNERS = {"makeitdown", "rag", "lawiki"}
 _TIERS = {"FLOOR", "CHOICE", "OUT"}
 _PHASES = {"install", "ingest", "answer"}
-_INPUT_KINDS = {"text", "secret", "select"}
+_INPUT_KINDS = {"text", "secret", "select", "bool"}
 
 
 def _nonempty(entry: dict, key: str) -> str:
@@ -52,23 +52,27 @@ def parse_capabilities(raw: list) -> list[dict]:
             _nonempty(entry, "rationale")
             continue
 
-        # FLOOR / CHOICE：须有承诺、sanctioned、合法 phase、确定性执行点。
+        # FLOOR / CHOICE：须有承诺、合法 phase、确定性执行点。
         _nonempty(entry, "promise")
         _nonempty(entry, "enforcement")  # 每个决策必须点名非 agent 的确定性执行点
-        sanctioned = entry.get("sanctioned")
+        sanctioned = entry.get("sanctioned") or {}
         if not isinstance(sanctioned, dict):
-            raise ValueError(f"能力 {cid}: {tier} 须带 sanctioned 对象")
+            raise ValueError(f"能力 {cid}: sanctioned 须为对象")
         phase = entry.get("phase", "ingest")
         if phase not in _PHASES:
             raise ValueError(f"能力 {cid}: phase 须为 {_PHASES}，得到 {phase!r}")
+        _validate_inputs(entry)
 
         if tier == "CHOICE":
             _nonempty(entry, "tradeoff")
-            if phase == "ingest" and not (sanctioned.get("gui_control") or "").strip():
-                raise ValueError(f"能力 {cid}: CHOICE(phase=ingest) 须有 sanctioned.gui_control")
+            gui_control = (sanctioned.get("gui_control") or "").strip()
+            has_inputs = bool(entry.get("inputs"))
+            if phase in ("ingest", "install") and not gui_control and not has_inputs:
+                raise ValueError(
+                    f"能力 {cid}: CHOICE(phase={phase}) 须有 gui_control 开关或 inputs 之一"
+                    "（否则 GUI 无从呈现）")
             if phase == "answer" and not (sanctioned.get("env") or "").strip():
                 raise ValueError(f"能力 {cid}: CHOICE(phase=answer) 须有 sanctioned.env")
-        _validate_inputs(entry)
     return list(raw)
 
 
@@ -101,6 +105,25 @@ def _validate_inputs(entry: dict) -> None:
                 if ref not in ids:
                     raise ValueError(
                         f"能力 {cid}: input {inp['id']} required_when 引用了不存在的输入 {ref!r}")
+
+
+def contract_knobs(caps: list[dict]) -> set[str]:
+    """契约账本里被交代过的所有旋钮名（env / CLI 标志）。完备性核对用：三模块
+    --list-knobs 报出的每个旋钮都必须落在这个集合里，否则说明有决策逃出了账本。
+    来源：sanctioned 的 ingest_flag/forbid_flag/env、每个 input 的 flag/env、OUT 的 knobs。"""
+    knobs: set[str] = set()
+    for cap in caps:
+        s = cap.get("sanctioned") or {}
+        for key in ("ingest_flag", "forbid_flag", "env"):
+            if s.get(key):
+                knobs.add(s[key])
+        for inp in cap.get("inputs", []):
+            for key in ("flag", "env"):
+                if inp.get(key):
+                    knobs.add(inp[key])
+        for kn in cap.get("knobs", []):
+            knobs.add(kn)
+    return knobs
 
 
 def build_gui_fields(cap: dict) -> list[dict]:

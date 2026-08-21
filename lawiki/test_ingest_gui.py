@@ -106,6 +106,47 @@ class BuildIngestArgvTests(unittest.TestCase):
         for flag in ("--ocr-cross-check", "--structure-headings", "--rag-parent-context"):
             self.assertNotIn(flag, argv)
 
+    def test_select_input_emits_flag_value(self):
+        argv = g.build_ingest_argv({"engine": "auto", "cross_check": True,
+                                    "cross_check_mode": "local"})
+        self.assertIn("--cross-check-mode", argv)
+        self.assertIn("local", argv)
+
+    def test_no_bogus_flag_from_gui_only_capability(self):
+        # unresolved_disposition 是 done 屏动作，无 CLI 标志——绝不进 ingest argv。
+        argv = g.build_ingest_argv({"engine": "auto", "unresolved_disposition": True})
+        self.assertNotIn("--disposition", argv)
+
+
+class BuildIngestEnvTests(unittest.TestCase):
+    def test_cross_check_token_env_when_enabled(self):
+        env = g.build_ingest_env({"engine": "auto", "cross_check": True,
+                                  "cross_check_mode": "cloud", "mineru_token": "TK"})
+        self.assertEqual(env.get("MINERU_API_TOKEN"), "TK")
+
+    def test_ocr_cloud_token_env(self):
+        env = g.build_ingest_env({"engine": "cloud", "cloud_token": "PK"})
+        self.assertEqual(env.get("PADDLEOCR_AISTUDIO_TOKEN"), "PK")
+
+    def test_disabled_capability_secret_not_injected(self):
+        env = g.build_ingest_env({"engine": "auto", "mineru_token": "TK"})  # cross_check off
+        self.assertNotIn("MINERU_API_TOKEN", env)
+
+
+class BuildCaseConfigTests(unittest.TestCase):
+    def test_answer_selections_persisted(self):
+        cfg = g.build_case_config({"rerank": True, "min_score": "0.3", "embed_backend": "ollama"})
+        self.assertEqual(cfg, {"rerank": True, "min_score": "0.3", "embed_backend": "ollama"})
+
+    def test_secret_never_persisted(self):
+        cfg = g.build_case_config({"rerank": True, "mineru_token": "TK", "llm_api_key": "K"})
+        self.assertNotIn("mineru_token", cfg)
+        self.assertNotIn("llm_api_key", cfg)
+
+    def test_empty_and_false_omitted(self):
+        cfg = g.build_case_config({"rerank": False, "min_score": ""})
+        self.assertEqual(cfg, {})
+
 
 if __name__ == "__main__":
     unittest.main()

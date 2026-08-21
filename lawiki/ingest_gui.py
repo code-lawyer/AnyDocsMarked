@@ -58,25 +58,81 @@ def summarize_report(merged: dict) -> str:
     return "\n".join(lines)
 
 
-def choice_controls() -> list[dict]:
-    """契约里 phase=ingest 的 CHOICE 能力（GUI 该渲染的开关），单一来源于 capabilities.json。"""
+def _caps_by_phase(phase: str) -> list[dict]:
     return [c for c in load_capabilities()
-            if c["tier"] == "CHOICE" and c.get("phase") == "ingest"
-            and c.get("sanctioned", {}).get("gui_control")]
+            if c["tier"] == "CHOICE" and c.get("phase") == phase]
+
+
+def choice_controls() -> list[dict]:
+    """契约里 phase=ingest 的 CHOICE 能力（GUI「高级」区该渲染的开关；不含 OCR 引擎那种
+    inputs-only 常显项）。单一来源于 capabilities.json。"""
+    return [c for c in _caps_by_phase("ingest")
+            if (c.get("sanctioned") or {}).get("gui_control")]
+
+
+def _cap_enabled(cap: dict, options: dict) -> bool:
+    """有 gui_control 开关的按开关；inputs-only（如 OCR 引擎）视为常启用。"""
+    gc = (cap.get("sanctioned") or {}).get("gui_control")
+    return bool(options.get(gc, False)) if gc else True
+
+
+def _secret_input_ids() -> set[str]:
+    ids: set[str] = set()
+    for cap in load_capabilities():
+        for inp in cap.get("inputs", []):
+            if inp.get("kind") == "secret":
+                ids.add(inp["id"])
+    return ids
 
 
 def build_ingest_argv(options: dict) -> list[str]:
-    """从 options 拼 ingest.py 的 argv（引擎/consent + 契约中启用的 CHOICE 标志）。
-    纯函数：GUI 与契约测试共用，能力清单只读 capabilities.json，不各抄一份。"""
-    argv = ["--ocr-engine", options.get("engine", "auto")]
-    if options.get("cloud_consent"):
-        argv.append("--cloud-consent")
-    for cap in choice_controls():
-        s = cap["sanctioned"]
-        flag = s.get("ingest_flag")
-        if flag and options.get(s["gui_control"]):
-            argv.append(flag)
+    """从 options 拼 ingest.py 的 argv：遍历契约 phase=ingest 的 CHOICE，产出其启用的
+    ingest 标志与 select/bool 类 input 标志。纯函数，GUI 与契约测试共用；能力清单只读
+    capabilities.json。text/secret 类 input 走环境变量（build_ingest_env），不进 argv。"""
+    argv: list[str] = []
+    for cap in _caps_by_phase("ingest"):
+        if not _cap_enabled(cap, options):
+            continue
+        s = cap.get("sanctioned") or {}
+        if s.get("gui_control") and s.get("ingest_flag"):
+            argv.append(s["ingest_flag"])
+        for inp in cap.get("inputs", []):
+            flag = inp.get("flag")
+            if not flag:
+                continue
+            val = options.get(inp["id"])
+            if inp["kind"] == "select" and val:
+                argv += [flag, str(val)]
+            elif inp["kind"] == "bool" and val:
+                argv.append(flag)
     return argv
+
+
+def build_ingest_env(options: dict) -> dict[str, str]:
+    """phase=ingest 的 text/secret 类 input → 子进程环境变量（token/凭证只经 env、不落盘）。
+    仅当所属 CHOICE 启用、且用户填了值时注入。"""
+    env: dict[str, str] = {}
+    for cap in _caps_by_phase("ingest"):
+        if not _cap_enabled(cap, options):
+            continue
+        for inp in cap.get("inputs", []):
+            name = inp.get("env")
+            val = options.get(inp["id"])
+            if name and inp["kind"] in ("text", "secret") and val:
+                env[name] = str(val)
+    return env
+
+
+def build_case_config(options: dict) -> dict:
+    """把 answer 期非密选择持久化进 <case>/.anydocsmarked/case.json 的内容（rag.py 会读它
+    注入 env）。secret 绝不落盘。空/False 略去。"""
+    secrets = _secret_input_ids()
+    cfg: dict = {}
+    for key in ("rerank", "min_score", "embed_backend"):
+        val = options.get(key)
+        if key not in secrets and val not in (None, "", False):
+            cfg[key] = val
+    return cfg
 
 
 def load_gui_config(path: Path) -> dict:

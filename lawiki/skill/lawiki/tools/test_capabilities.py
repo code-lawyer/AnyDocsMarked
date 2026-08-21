@@ -112,6 +112,34 @@ class InputsSchemaTests(unittest.TestCase):
             parse_capabilities([c])
 
 
+class SelectPrimaryCapabilityTests(unittest.TestCase):
+    """有些决策没有 on/off 开关，而是一个 select（如 OCR 引擎 local/cloud/auto）——
+    此时用 inputs 呈现、无 gui_control 也合法。"""
+
+    def _select_primary(self):
+        return {"id": "ocr_engine", "promise": "OCR 引擎", "owner": "makeitdown",
+                "tier": "CHOICE", "phase": "ingest", "tradeoff": "本地私密 vs 云端轻快",
+                "enforcement": "makeitdown --ocr-engine 代码路径",
+                "inputs": [
+                    {"id": "engine", "label": "引擎", "kind": "select",
+                     "options": ["auto", "local", "cloud"], "flag": "--ocr-engine"},
+                    {"id": "consent", "label": "同意上传", "kind": "bool", "flag": "--cloud-consent"},
+                ]}
+
+    def test_choice_surfaced_by_inputs_without_gui_control(self):
+        parse_capabilities([self._select_primary()])  # 不抛
+
+    def test_bool_input_kind_accepted(self):
+        parse_capabilities([self._select_primary()])  # consent 是 bool 输入
+
+    def test_ingest_choice_with_neither_gui_control_nor_inputs_rejected(self):
+        bad = {"id": "x", "promise": "p", "owner": "makeitdown", "tier": "CHOICE",
+               "phase": "ingest", "tradeoff": "t", "enforcement": "e",
+               "sanctioned": {"default_on": False}}
+        with self.assertRaises(ValueError):
+            parse_capabilities([bad])
+
+
 class BuildGuiFieldsTests(unittest.TestCase):
     def test_toggle_plus_inputs(self):
         c = _choice_ingest()
@@ -121,6 +149,30 @@ class BuildGuiFieldsTests(unittest.TestCase):
         self.assertEqual(ids, ["x", "tok"])  # gui_control 开关在前，输入随后
         self.assertEqual(fields[0]["kind"], "toggle")
         self.assertEqual(fields[1]["kind"], "secret")
+
+
+class ContractKnobsTests(unittest.TestCase):
+    def test_collects_flags_and_env_across_entries(self):
+        from capabilities import contract_knobs
+        caps = [
+            _choice_ingest(),  # sanctioned.ingest_flag = --x
+            {"id": "o", "owner": "rag", "tier": "OUT", "rationale": "调优",
+             "knobs": ["RAG_RRF_K", "--workers"]},
+        ]
+        knobs = contract_knobs(caps)
+        self.assertIn("--x", knobs)
+        self.assertIn("RAG_RRF_K", knobs)
+        self.assertIn("--workers", knobs)
+
+    def test_collects_input_flag_and_env(self):
+        from capabilities import contract_knobs
+        c = _choice_ingest()
+        c["inputs"] = [{"id": "m", "label": "l", "kind": "select",
+                        "options": ["a"], "flag": "--mode"},
+                       {"id": "t", "label": "l", "kind": "secret", "env": "TOK"}]
+        knobs = contract_knobs([c])
+        self.assertIn("--mode", knobs)
+        self.assertIn("TOK", knobs)
 
 
 class LoadRealFileTests(unittest.TestCase):
