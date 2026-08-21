@@ -18,7 +18,8 @@ _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "capabilities.json"
 
 _OWNERS = {"makeitdown", "rag", "lawiki"}
 _TIERS = {"FLOOR", "CHOICE", "OUT"}
-_PHASES = {"ingest", "answer"}
+_PHASES = {"install", "ingest", "answer"}
+_INPUT_KINDS = {"text", "secret", "select"}
 
 
 def _nonempty(entry: dict, key: str) -> str:
@@ -51,8 +52,9 @@ def parse_capabilities(raw: list) -> list[dict]:
             _nonempty(entry, "rationale")
             continue
 
-        # FLOOR / CHOICE：须有承诺、sanctioned 与合法 phase。
+        # FLOOR / CHOICE：须有承诺、sanctioned、合法 phase、确定性执行点。
         _nonempty(entry, "promise")
+        _nonempty(entry, "enforcement")  # 每个决策必须点名非 agent 的确定性执行点
         sanctioned = entry.get("sanctioned")
         if not isinstance(sanctioned, dict):
             raise ValueError(f"能力 {cid}: {tier} 须带 sanctioned 对象")
@@ -66,7 +68,53 @@ def parse_capabilities(raw: list) -> list[dict]:
                 raise ValueError(f"能力 {cid}: CHOICE(phase=ingest) 须有 sanctioned.gui_control")
             if phase == "answer" and not (sanctioned.get("env") or "").strip():
                 raise ValueError(f"能力 {cid}: CHOICE(phase=answer) 须有 sanctioned.env")
+        _validate_inputs(entry)
     return list(raw)
+
+
+def _validate_inputs(entry: dict) -> None:
+    """校验可选的 inputs（GUI 需向用户收集的字段）。"""
+    inputs = entry.get("inputs")
+    if inputs is None:
+        return
+    cid = entry.get("id", "?")
+    if not isinstance(inputs, list):
+        raise ValueError(f"能力 {cid}: inputs 须为列表")
+    ids = {inp.get("id") for inp in inputs if isinstance(inp, dict)}
+    for inp in inputs:
+        if not isinstance(inp, dict):
+            raise ValueError(f"能力 {cid}: 每个 input 须为对象")
+        _nonempty(inp, "id")
+        _nonempty(inp, "label")
+        kind = inp.get("kind")
+        if kind not in _INPUT_KINDS:
+            raise ValueError(f"能力 {cid}: input {inp.get('id')} kind 须为 {_INPUT_KINDS}")
+        if kind == "select" and not (isinstance(inp.get("options"), list) and inp["options"]):
+            raise ValueError(f"能力 {cid}: select 输入 {inp['id']} 须带非空 options")
+        if not (inp.get("env") or inp.get("flag")):
+            raise ValueError(f"能力 {cid}: input {inp['id']} 须声明 env 或 flag（值落到哪）")
+        rw = inp.get("required_when")
+        if rw is not None:
+            if not isinstance(rw, dict):
+                raise ValueError(f"能力 {cid}: input {inp['id']} required_when 须为对象")
+            for ref in rw:
+                if ref not in ids:
+                    raise ValueError(
+                        f"能力 {cid}: input {inp['id']} required_when 引用了不存在的输入 {ref!r}")
+
+
+def build_gui_fields(cap: dict) -> list[dict]:
+    """把一个 CHOICE 展开成 GUI 该渲染的字段：开关（gui_control）+ 各 input。
+    纯函数，GUI 与契约测试共用（契约测试据此断言每个开关/输入都在 GUI 可达）。"""
+    fields: list[dict] = []
+    gc = (cap.get("sanctioned") or {}).get("gui_control")
+    if gc:
+        fields.append({"kind": "toggle", "id": gc,
+                       "label": cap.get("tradeoff") or cap.get("promise", "")})
+    for inp in cap.get("inputs", []):
+        fields.append({"kind": inp["kind"], "id": inp["id"], "label": inp["label"],
+                       "options": inp.get("options"), "required_when": inp.get("required_when")})
+    return fields
 
 
 @lru_cache(maxsize=None)
