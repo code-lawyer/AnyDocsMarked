@@ -141,3 +141,17 @@ def test_search_show_parent_prints_parent_block(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "child" in out
     assert "THE PARENT BLOCK" in out
+
+
+def test_list_knobs_env_present_and_cloud_removed():
+    import json
+
+    from rag_retriever.cli import _list_knobs_json
+
+    d = json.loads(_list_knobs_json())
+    assert d["module"] == "rag-retriever"
+    assert "RAG_EMBED_BACKEND" in d["env"]
+    assert "RAG_MIN_SCORE" in d["env"]
+    # cloud embedding removed — these must be gone
+    assert "RAG_CLOUD_CONSENT" not in d["env"]
+    assert not any(e.startswith("RAG_OPENAI") for e in d["env"])

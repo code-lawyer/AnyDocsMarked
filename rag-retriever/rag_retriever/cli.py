@@ -10,12 +10,30 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import replace
 from pathlib import Path
 
 from .config import Config, split_csv
 from .pipeline import Retriever
+
+_FLAG_RE = re.compile(r"""add_argument\(\s*["'](-{1,2}[a-zA-Z][\w-]*)""")
+_ENV_RE = re.compile(r"""(?:environ\.get\(|environ\[|getenv\(|_env\w*\()\s*["']([A-Z][A-Z0-9_]{2,})""")
+
+
+def _list_knobs_json() -> str:
+    """本模块所有决策旋钮：CLI 标志 + 读取的环境变量（自查本包源码，装机布局下也可用）。
+    自动派生——新增一个旋钮会自动进入 --list-knobs，被能力契约完备性核对。"""
+    pkg = Path(__file__).parent
+    flags: set[str] = set()
+    env: set[str] = set()
+    for p in pkg.glob("*.py"):
+        src = p.read_text(encoding="utf-8")
+        flags |= set(_FLAG_RE.findall(src))
+        env |= set(_ENV_RE.findall(src))
+    return json.dumps({"module": "rag-retriever", "flags": sorted(flags), "env": sorted(env)},
+                      ensure_ascii=False)
 
 
 def main() -> None:
@@ -31,6 +49,10 @@ def main() -> None:
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+    if "--list-knobs" in sys.argv[1:]:
+        print(_list_knobs_json())
+        return
 
     parser = argparse.ArgumentParser(prog="rag-retriever")
     parser.add_argument(

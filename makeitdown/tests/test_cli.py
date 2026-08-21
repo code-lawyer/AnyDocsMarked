@@ -298,3 +298,24 @@ def test_convert_tree_warns_on_empty_dir(tmp_path, capsys):
                           mineru_token=None)
     assert report["succeeded"] == 0
     assert "0" in capsys.readouterr().err   # 明说"找到 0 个文件"，而非静默
+
+
+def test_list_knobs_covers_flags_and_env():
+    import json
+    from makeitdown.cli import _list_knobs_json
+
+    d = json.loads(_list_knobs_json())
+    assert d["module"] == "makeitdown"
+    assert "--ocr-engine" in d["flags"]
+    assert "--ocr-cross-check" in d["flags"]
+    assert "PADDLEOCR_AISTUDIO_TOKEN" in d["env"]
+    assert "MINERU_API_TOKEN" in d["env"]
+
+
+def test_list_knobs_flag_returns_zero_and_prints_json(capsys):
+    import json
+
+    from makeitdown.cli import main
+
+    assert main(["--list-knobs"]) == 0
+    json.loads(capsys.readouterr().out)  # valid JSON, no crash

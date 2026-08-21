@@ -1,5 +1,7 @@
 import argparse
+import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -80,7 +82,32 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+_ENV_RE = re.compile(r"""(?:environ\.get\(|environ\[|getenv\()\s*["']([A-Z][A-Z0-9_]{2,})""")
+
+
+def _read_env_names() -> list[str]:
+    """本包源码里实际读取的环境变量名（自查同模块源码，装机布局下也可用）。
+    自动派生，故新增一个 env 读取会自动进入 --list-knobs、被能力契约完备性核对。"""
+    names: set[str] = set()
+    for p in Path(__file__).parent.glob("*.py"):
+        names |= set(_ENV_RE.findall(p.read_text(encoding="utf-8")))
+    return sorted(names)
+
+
+def _list_knobs_json() -> str:
+    """本模块所有决策旋钮：CLI 标志（从 parser 派生）+ 读取的环境变量（自查源码）。
+    供能力接线契约的完备性核对（每个旋钮须登记 FLOOR/CHOICE/OUT）。"""
+    parser = _build_parser()
+    flags = sorted({opt for a in parser._actions for opt in a.option_strings})
+    return json.dumps({"module": "makeitdown", "flags": flags, "env": _read_env_names()},
+                      ensure_ascii=False)
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw = sys.argv[1:] if argv is None else argv
+    if "--list-knobs" in raw:
+        print(_list_knobs_json())
+        return 0
     args = _build_parser().parse_args(argv)
     input_dir = Path(args.input)
     if not input_dir.is_dir():
