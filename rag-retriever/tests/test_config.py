@@ -117,38 +117,22 @@ def test_min_score_nonfinite_or_out_of_range_falls_back(monkeypatch, value):
         assert Config.load().min_score == 0.0
 
 
-def test_openai_backend_requires_explicit_cloud_consent(monkeypatch):
-    from rag_retriever.embed import ExternalProcessingConsentRequired, get_embedder
-
+def test_openai_backend_removed(monkeypatch):
+    # 云端 embedding 已删除：openai 后端不再是合法值，加载即 ValueError。
     monkeypatch.setenv("RAG_EMBED_BACKEND", "openai")
-    monkeypatch.setenv("RAG_OPENAI_API_KEY", "test-key")
-    monkeypatch.delenv("RAG_CLOUD_CONSENT", raising=False)
-    get_embedder.cache_clear()
-
-    with pytest.raises(ExternalProcessingConsentRequired):
-        get_embedder(Config.load())
+    with pytest.raises(ValueError):
+        Config.load()
 
 
-def test_openai_backend_is_available_after_explicit_cloud_consent(monkeypatch):
-    from rag_retriever.embed import OpenAICompatEmbedder, get_embedder
-
-    monkeypatch.setenv("RAG_EMBED_BACKEND", "openai")
-    monkeypatch.setenv("RAG_OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("RAG_CLOUD_CONSENT", "1")
-    get_embedder.cache_clear()
-
-    assert isinstance(get_embedder(Config.load()), OpenAICompatEmbedder)
-
-
-def test_remote_ollama_requires_explicit_cloud_consent(monkeypatch):
-    from rag_retriever.embed import ExternalProcessingConsentRequired, get_embedder
+def test_remote_ollama_hard_rejected(monkeypatch):
+    # 非 loopback ollama 会外传正文——无条件硬拒（无 consent 逃生口）。
+    from rag_retriever.embed import get_embedder
 
     monkeypatch.setenv("RAG_EMBED_BACKEND", "ollama")
     monkeypatch.setenv("RAG_OLLAMA_URL", "https://ollama.example.com")
-    monkeypatch.delenv("RAG_CLOUD_CONSENT", raising=False)
     get_embedder.cache_clear()
 
-    with pytest.raises(ExternalProcessingConsentRequired):
+    with pytest.raises(ValueError):
         get_embedder(Config.load())
 
 
@@ -156,23 +140,11 @@ def test_remote_ollama_requires_explicit_cloud_consent(monkeypatch):
     "url",
     ["http://localhost:11434", "http://127.0.0.2:11434", "http://[::1]:11434"],
 )
-def test_loopback_ollama_does_not_require_cloud_consent(monkeypatch, url):
+def test_loopback_ollama_ok(monkeypatch, url):
     from rag_retriever.embed import OllamaEmbedder, get_embedder
 
     monkeypatch.setenv("RAG_EMBED_BACKEND", "ollama")
     monkeypatch.setenv("RAG_OLLAMA_URL", url)
-    monkeypatch.delenv("RAG_CLOUD_CONSENT", raising=False)
-    get_embedder.cache_clear()
-
-    assert isinstance(get_embedder(Config.load()), OllamaEmbedder)
-
-
-def test_remote_ollama_is_available_after_explicit_cloud_consent(monkeypatch):
-    from rag_retriever.embed import OllamaEmbedder, get_embedder
-
-    monkeypatch.setenv("RAG_EMBED_BACKEND", "ollama")
-    monkeypatch.setenv("RAG_OLLAMA_URL", "https://ollama.example.com")
-    monkeypatch.setenv("RAG_CLOUD_CONSENT", "1")
     get_embedder.cache_clear()
 
     assert isinstance(get_embedder(Config.load()), OllamaEmbedder)

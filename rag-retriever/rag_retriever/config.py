@@ -46,37 +46,32 @@ def split_csv(s: str) -> tuple[str, ...]:
 
 
 # Default embedding model per backend (bge-m3 is strong on Chinese + long text).
-# - local (fastembed) has no bge-m3; bge-small-zh-v1.5 is the safe Chinese option.
-#   For higher quality stay local with intfloat/multilingual-e5-large or
-#   jinaai/jina-embeddings-v3, or use ollama/openai for true bge-m3.
-# - ollama / openai both serve real bge-m3 (best Chinese + long-text).
+# Both backends run **on-device** — no cloud embedding (case text never leaves the
+# machine). local (fastembed) has no bge-m3; bge-small-zh-v1.5 is the safe Chinese
+# option (release-bundled, offline). For true bge-m3 quality run a **local** ollama.
 _DEFAULT_MODEL = {
     "local": "BAAI/bge-small-zh-v1.5",
     "ollama": "bge-m3",
-    "openai": "BAAI/bge-m3",  # SiliconFlow hosts bge-m3 under this id
 }
 
 # Default chunk size per backend, sized to the model's input window so chunks
 # aren't silently truncated at embed time. The local fastembed default
 # (bge-small-zh-v1.5) caps at 512 tokens; tiktoken (o200k) over-counts CJK vs
-# the model's tokenizer, so 384 leaves headroom. bge-m3 (ollama/openai) handles
+# the model's tokenizer, so 384 leaves headroom. bge-m3 (local ollama) handles
 # 8192, so the larger 800 keeps more context per chunk. Override via
 # RAG_CHUNK_TOKENS regardless of backend.
-_DEFAULT_CHUNK_TOKENS = {"local": 384, "ollama": 800, "openai": 800}
+_DEFAULT_CHUNK_TOKENS = {"local": 384, "ollama": 800}
 
 
 @dataclass(frozen=True)
 class Config:
-    # Which embedding backend: "local" (fastembed) | "ollama" | "openai" (openai-compatible)
+    # Which embedding backend: "local" (fastembed) | "ollama" (local server). Both
+    # on-device — there is no cloud embedding backend (case text never leaves the box).
     embed_backend: str
     embed_model: str
 
-    # ollama
+    # ollama (local server only; remote endpoints are rejected — no cloud embedding)
     ollama_url: str
-
-    # openai-compatible (e.g. SiliconFlow)
-    openai_base_url: str
-    openai_api_key: str
 
     # storage
     data_dir: Path
@@ -88,14 +83,12 @@ class Config:
     # Optional path to a locally vendored copy of the local model's ONNX files.
     # Empty = auto-detect the release-bundled copy (or download if absent).
     embed_model_path: str = ""
-    # Separate acknowledgement for any embedding endpoint that sends case text off-device.
-    cloud_consent: bool = False
 
     # frontmatter fields to carry through as per-hit metadata (domain-agnostic).
     # Empty = none. The retriever does not interpret these; callers do.
     metadata_fields: tuple[str, ...] = ()
 
-    # Max texts per request to the HTTP embedders (ollama/openai). A big document
+    # Max texts per request to the HTTP embedder (local ollama). A big document
     # can yield hundreds of chunks; batching keeps each request under provider
     # payload/timeout limits. Ignored by the local (fastembed) backend, which
     # batches internally.
@@ -166,10 +159,7 @@ class Config:
             embed_backend=backend,
             embed_model=model,
             embed_model_path=_env("RAG_EMBED_MODEL_PATH", ""),
-            cloud_consent=_env_bool("RAG_CLOUD_CONSENT", False),
             ollama_url=_env("RAG_OLLAMA_URL", "http://localhost:11434"),
-            openai_base_url=_env("RAG_OPENAI_BASE_URL", "https://api.siliconflow.cn/v1"),
-            openai_api_key=_env("RAG_OPENAI_API_KEY", ""),
             data_dir=data_dir,
             chunk_tokens=chunk_tokens,
             chunk_overlap=_env_int("RAG_CHUNK_OVERLAP", 100),

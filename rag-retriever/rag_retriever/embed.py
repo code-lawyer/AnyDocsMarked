@@ -1,8 +1,9 @@
-"""Pluggable embedding backends: local (fastembed) | ollama | openai-compatible.
+"""Pluggable embedding backends: local (fastembed) | ollama (local server only).
 
-All three expose the same interface so the rest of the pipeline never cares
-where vectors come from. Index-time and query-time MUST use the same backend +
-model, or similarity is meaningless — switching models requires re-indexing.
+Both run on-device — there is no cloud embedding backend, so case text never
+leaves the machine. Both expose the same interface so the rest of the pipeline
+never cares where vectors come from. Index-time and query-time MUST use the same
+backend + model, or similarity is meaningless — switching models requires re-indexing.
 """
 
 from __future__ import annotations
@@ -17,10 +18,6 @@ from urllib.parse import urlsplit
 import httpx
 
 from .config import Config
-
-
-class ExternalProcessingConsentRequired(RuntimeError):
-    """Raised before case text is sent to an external embedding endpoint."""
 
 
 def _is_loopback_url(url: str) -> bool:
@@ -111,7 +108,7 @@ class LocalEmbedder:
                     f"anydocsmarked-*-offline.zip 发布包（内置模型，索引零下载）；② 设环境变量 "
                     f"HF_ENDPOINT=https://hf-mirror.com（或其他可达镜像）后重试；③ 设 "
                     f"RAG_EMBED_MODEL_PATH 指向手动搬运到本机的模型目录；④ 换后端 "
-                    f"RAG_EMBED_BACKEND=ollama/openai（见 setup.md）。"
+                    f"RAG_EMBED_BACKEND=ollama（本地服务，见 setup.md）。"
                 ) from e
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -167,52 +164,18 @@ class OllamaEmbedder(_HttpEmbedder):
         return resp.json()["embeddings"]
 
 
-class OpenAICompatEmbedder(_HttpEmbedder):
-    """Any OpenAI-compatible /embeddings endpoint (SiliconFlow, DashScope, etc.)."""
-
-    def __init__(self, model_name: str, base_url: str, api_key: str, batch_size: int = 64):
-        if not api_key:
-            raise ValueError(
-                "RAG_OPENAI_API_KEY is required for the 'openai' backend "
-                "(e.g. your SiliconFlow key)."
-            )
-        self._model = model_name
-        self._url = base_url.rstrip("/") + "/embeddings"
-        self._headers = {"Authorization": f"Bearer {api_key}"}
-        self._batch_size = batch_size
-
-    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        resp = httpx.post(
-            self._url,
-            json={"model": self._model, "input": texts},
-            headers=self._headers,
-            timeout=120,
-        )
-        resp.raise_for_status()
-        data = resp.json()["data"]
-        # Preserve input order regardless of provider response ordering.
-        data.sort(key=lambda d: d["index"])
-        return [d["embedding"] for d in data]
-
-
 @lru_cache(maxsize=1)
 def get_embedder(cfg: Config) -> Embedder:
     if cfg.embed_backend == "local":
         return LocalEmbedder(cfg.embed_model, cfg.embed_model_path or None)
     if cfg.embed_backend == "ollama":
-        if not _is_loopback_url(cfg.ollama_url) and not cfg.cloud_consent:
-            raise ExternalProcessingConsentRequired(
-                "RAG_OLLAMA_URL is not a loopback endpoint and may send case text off-device. "
-                "Set RAG_CLOUD_CONSENT=1 only after confirming the endpoint and data scope."
+        # Remote ollama would send case text off-device. No cloud embedding: only a
+        # loopback server is allowed, and there is no consent escape hatch.
+        if not _is_loopback_url(cfg.ollama_url):
+            raise ValueError(
+                "RAG_OLLAMA_URL must be a loopback endpoint (localhost / 127.0.0.1 / [::1]); "
+                "a remote ollama would send case text off-device and is not supported. "
+                "Run ollama locally, or use the bundled local backend."
             )
         return OllamaEmbedder(cfg.embed_model, cfg.ollama_url, cfg.embed_batch_size)
-    if cfg.embed_backend == "openai":
-        if not cfg.cloud_consent:
-            raise ExternalProcessingConsentRequired(
-                "RAG_EMBED_BACKEND=openai sends case text to an external service. "
-                "Set RAG_CLOUD_CONSENT=1 only after confirming the provider and data scope."
-            )
-        return OpenAICompatEmbedder(
-            cfg.embed_model, cfg.openai_base_url, cfg.openai_api_key, cfg.embed_batch_size
-        )
     raise ValueError(f"Unknown embed backend: {cfg.embed_backend}")

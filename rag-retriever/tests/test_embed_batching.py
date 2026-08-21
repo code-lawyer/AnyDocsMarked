@@ -38,25 +38,6 @@ def test_ollama_splits_into_batches(monkeypatch):
     assert calls == [2, 2, 1]  # 5 texts, batch size 2
 
 
-def test_openai_batches_and_preserves_global_order(monkeypatch):
-    calls = []
-
-    def fake_post(url, json, headers, timeout):
-        texts = json["input"]
-        calls.append(len(texts))
-        # Return rows in REVERSED index order to prove per-batch sorting works.
-        data = [{"index": i, "embedding": [float(i)]} for i in reversed(range(len(texts)))]
-        return _FakeResp({"data": data})
-
-    monkeypatch.setattr(embed_mod.httpx, "post", fake_post)
-    e = embed_mod.OpenAICompatEmbedder("m", "http://x", "key", batch_size=2)
-
-    out = e.embed_documents(["a", "b", "c"])
-    assert calls == [2, 1]
-    # batch1 (a,b) -> indices 0,1 ; batch2 (c) -> index 0
-    assert out == [[0.0], [1.0], [0.0]]
-
-
 def test_empty_input_makes_no_request(monkeypatch):
     def boom(*a, **k):  # must not be called
         raise AssertionError("no request expected for empty input")

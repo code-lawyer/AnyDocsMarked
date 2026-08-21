@@ -106,8 +106,35 @@ def _rag_base() -> list[str]:
     return shlex.split(os.environ.get("LAWIKI_RAG_CMD", "rag-retriever"))
 
 
+def answer_env_from_case(case: Path) -> dict[str, str]:
+    """把用户在 GUI 选的 answer 期旋钮（持久化在 <case>/.anydocsmarked/case.json）映射成
+    rag-retriever 认的 RAG_* 环境变量。这是"选了必须硬执行、不委托 agent"的兑现点：
+    _run_rag 每次 spawn 前调它，任何工具消费 RAG 都自动带上用户的选择。best-effort：
+    无配置/读不到/解析失败 → {}，绝不抛异常。仅非密项（rerank/min_score/embed_backend）。"""
+    cfg_path = case / ".anydocsmarked" / "case.json"
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(cfg, dict):
+        return {}
+    env: dict[str, str] = {}
+    if cfg.get("rerank") is True:
+        env["RAG_RERANK"] = "local"
+    if isinstance(cfg.get("min_score"), (int, float)) and not isinstance(cfg.get("min_score"), bool):
+        env["RAG_MIN_SCORE"] = str(cfg["min_score"])
+    backend = cfg.get("embed_backend")
+    if isinstance(backend, str) and backend:
+        env["RAG_EMBED_BACKEND"] = backend
+    return env
+
+
 def _run_rag(data_dir: Path, args: list[str]) -> subprocess.CompletedProcess | None:
     """跑一条 rag-retriever 子命令。未装（命令找不到）→ None（触发降级）。
+
+    子进程继承 os.environ，并叠加 answer_env_from_case(<case>)——case 根即 data_dir 的
+    父目录（约定 data_dir=<case>/.rag）。这样 GUI 里选的 rerank/min_score 由本工具确定性
+    注入，与 agent 记不记得无关。
 
     ``errors="replace"``：子进程崩溃时的 traceback 可能混入非 UTF-8 字节
     （如 Windows 系统调用错误信息按本机代码页而非 UTF-8 写出）——严格解码会在
@@ -115,9 +142,10 @@ def _run_rag(data_dir: Path, args: list[str]) -> subprocess.CompletedProcess | N
     看到的报错。宁可片段被替换成 �，也不能整条诊断信息丢失。
     """
     cmd = [*_rag_base(), "--data-dir", str(data_dir), *args]
+    env = {**os.environ, **answer_env_from_case(data_dir.parent)}
     try:
         return subprocess.run(cmd, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace")
+                              encoding="utf-8", errors="replace", env=env)
     except FileNotFoundError:
         return None
 

@@ -117,16 +117,16 @@ uv tool install --index https://mirrors.aliyun.com/pypi/simple "rag-retriever @ 
 ```
 （开发期也可不装、用环境变量 `LAWIKI_RAG_CMD='uv run --project "<本地路径>" rag-retriever'` 指向本地仓库，见 `rag.md`。海外可去掉 `--index`。）
 
-**选 embedding 后端**（与 OCR 同样的「本地 vs 云端」权衡，把这张给用户选）：
+**选 embedding 后端**（两个都在**本机**跑——**无云端 embedding，案件正文永不离机**）：
 
-| | `local`（fastembed） | `ollama`（bge-m3） | `openai`（硅基流动 bge-m3） |
-|---|---|---|---|
-| 联网 | **不需要**，离线 | 不需要（本地服务） | 需要 |
-| 账号 / key | **不需要** | 不需要 | 需 API key |
-| 中文质量 | 可用（bge-small-zh） | **最佳** | 最佳 |
-| 适合 | 涉密 / 离线 | 有本地 ollama、要质量 | 要轻量、不介意联网 |
+| | `local`（fastembed） | `ollama`（bge-m3，本地服务） |
+|---|---|---|
+| 联网 | **不需要**，离线（offline 包内置模型） | 不需要（本地 ollama 服务） |
+| 账号 / key | **不需要** | 不需要 |
+| 中文质量 | 可用（bge-small-zh） | **最佳** |
+| 适合 | 涉密 / 离线 / 开箱即用 | 已跑本地 ollama、要 bge-m3 质量 |
 
-用环境变量选：`RAG_EMBED_BACKEND=local|ollama|openai`（默认 `local`）；`openai` 另需 `RAG_OPENAI_API_KEY`（硅基流动）。key 绝不写进文件、不提交。
+用环境变量选：`RAG_EMBED_BACKEND=local|ollama`（默认 `local`）。**云端 embedding（openai/远程 ollama）已移除**——想要 bge-m3 质量走**本地** ollama，无需上云；`RAG_OLLAMA_URL` 必须是 loopback，远程端点会被硬拒。
 
 **答案侧可选加强（查询期能力，能力接线契约里标 `phase=answer`）**：这两项在**问答**阶段生效，不由摄入 GUI 控制，按需在答案环境设环境变量——
 - `RAG_RERANK=local`：交叉编码器重排，提升精排质量；需联网下载重排模型、更慢。

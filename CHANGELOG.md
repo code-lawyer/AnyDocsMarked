@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Changed / Removed
+
+- **移除云端 embedding 后端(隐私收束,破坏性变更)**:rag-retriever 删除 `openai` 后端与远程 ollama 支持——embedding 只可能在本机算,案件正文永不因建索引而外传。合法 `RAG_EMBED_BACKEND` 收敛为 `local`(内置 `bge-small-zh`,离线) / `ollama`(本地服务 `bge-m3`);非 loopback `RAG_OLLAMA_URL` 无条件硬拒(去掉 `RAG_CLOUD_CONSENT` 逃生口)。删除 `RAG_OPENAI_API_KEY`/`RAG_OPENAI_BASE_URL`/`RAG_CLOUD_CONSENT`。想要 bge-m3 质量走本地 ollama,无需上云。
+- **answer 期检索旋钮由工具确定性兑现,不委托 agent**:lawiki `rag.py` 包装器(消费 RAG 的单一入口)在 spawn rag-retriever 子进程前,读 `<case>/.anydocsmarked/case.json` 把用户选的 `rerank`/`min_score`/`embed_backend` 注入子进程环境变量。任何工具碰 RAG 都自动带上用户选择,与 agent 记不记得无关(为三阶段 GUI 决策落地做准备)。
+
 ### Added
 
 - **能力接线契约**（`lawiki/skill/lawiki/capabilities.json` + `tools/capabilities.py`):把"承诺相关能力 → sanctioned 路径接线要求"做成单一真值来源(FLOOR 必开 / CHOICE 让人选 / OUT 明确排除),ingest/GUI/install 各自读契约接线,并新增契约测试 `test_capability_contract.py` 断言接线成立——把过去不可见的编排/GUI/安装接缝变成 CI 看得见的门。首批修复:① 双 OCR 互校(`--ocr-cross-check`)接入 ingest 透传 + GUI「高级」开关;② `ocr_rotate.py` 旋转纠偏从死代码接入 OCR 路径(仅对低置信扫描件重探,限成本);③ `install.py` 新增问答后闸门(stop_hook)就绪检测与告警(不侵入用户 settings);④ `--structure-headings` 与 rag `parent_context`(索引期)经 GUI 高级区可达;⑤ rag `rerank`/`min_score`(查询期)在 setup.md/SKILL 文档化为答案侧可选加强。

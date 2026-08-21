@@ -30,8 +30,6 @@ def _cfg(tmp_path: Path) -> Config:
         embed_backend="local",
         embed_model="fake",
         ollama_url="",
-        openai_base_url="",
-        openai_api_key="",
         data_dir=tmp_path / ".rag",
         chunk_tokens=800,
         chunk_overlap=100,

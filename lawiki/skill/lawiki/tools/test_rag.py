@@ -193,6 +193,74 @@ class RunRagDecodeSafetyTests(_PatchRagRunMixin, unittest.TestCase):
         self.assertEqual(captured.get("errors"), "replace")
 
 
+class AnswerEnvFromCaseTests(unittest.TestCase):
+    """answer 期旋钮由工具确定性兑现：rag.py 读 <case>/.anydocsmarked/case.json，
+    把用户在 GUI 选的 rerank/min_score 映射成 RAG_* —— 不靠 agent 记得 export。"""
+
+    def _write(self, case: Path, obj: dict) -> None:
+        d = case / ".anydocsmarked"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "case.json").write_text(json.dumps(obj), encoding="utf-8")
+
+    def test_maps_known_keys(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            self._write(case, {"rerank": True, "min_score": 0.3, "embed_backend": "ollama"})
+            self.assertEqual(rag.answer_env_from_case(case), {
+                "RAG_RERANK": "local", "RAG_MIN_SCORE": "0.3", "RAG_EMBED_BACKEND": "ollama"})
+
+    def test_absent_config_is_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(rag.answer_env_from_case(Path(td)), {})
+
+    def test_rerank_false_omitted(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            self._write(case, {"rerank": False})
+            self.assertEqual(rag.answer_env_from_case(case), {})
+
+    def test_unreadable_json_is_empty_not_raise(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            (case / ".anydocsmarked").mkdir()
+            (case / ".anydocsmarked" / "case.json").write_text("{bad", encoding="utf-8")
+            self.assertEqual(rag.answer_env_from_case(case), {})
+
+
+class RunRagInjectsAnswerEnvTests(_PatchRagRunMixin, unittest.TestCase):
+    def test_run_rag_injects_case_json_env_into_subprocess(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            (case / ".anydocsmarked").mkdir()
+            (case / ".anydocsmarked" / "case.json").write_text(
+                json.dumps({"rerank": True, "min_score": 0.3}), encoding="utf-8")
+            captured = {}
+
+            def fake_run(cmd, **kw):
+                captured["env"] = kw.get("env")
+                return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+            self._patch_run(fake_run)
+            # data_dir = <case>/.rag → wrapper derives case root as data_dir.parent
+            rag._run_rag(case / ".rag", ["stats"])
+            self.assertEqual(captured["env"]["RAG_RERANK"], "local")
+            self.assertEqual(captured["env"]["RAG_MIN_SCORE"], "0.3")
+
+    def test_run_rag_no_case_json_does_not_inject(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            captured = {}
+
+            def fake_run(cmd, **kw):
+                captured["env"] = kw.get("env")
+                return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+            self._patch_run(fake_run)
+            rag._run_rag(case / ".rag", ["stats"])
+            env = captured["env"] or {}
+            self.assertNotIn("RAG_RERANK", env)
+
+
 class NoticeSurfacingTests(_PatchRagRunMixin, unittest.TestCase):
     # Real incident (LAWIKI-RAG-001): rag-retriever prints a non-fatal heads-up
     # to stderr ("no vendored model, downloading over network") before a slow/
