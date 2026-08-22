@@ -118,6 +118,22 @@ class BuildIngestArgvTests(unittest.TestCase):
         self.assertNotIn("--disposition", argv)
 
 
+class BuildInstallEnvTests(unittest.TestCase):
+    def test_ollama_url_injected_when_ollama_backend(self):
+        env = g.build_install_env({"embed_backend": "ollama",
+                                   "ollama_url": "http://127.0.0.1:9999"})
+        self.assertEqual(env.get("RAG_OLLAMA_URL"), "http://127.0.0.1:9999")
+
+    def test_embed_backend_injected(self):
+        env = g.build_install_env({"embed_backend": "ollama", "ollama_url": "http://x"})
+        self.assertEqual(env.get("RAG_EMBED_BACKEND"), "ollama")
+
+    def test_empty_when_default_local(self):
+        # local 后端不需要 ollama_url；未填则不注入。
+        env = g.build_install_env({"embed_backend": "local"})
+        self.assertNotIn("RAG_OLLAMA_URL", env)
+
+
 class BuildIngestEnvTests(unittest.TestCase):
     def test_cross_check_token_env_when_enabled(self):
         env = g.build_ingest_env({"engine": "auto", "cross_check": True,
@@ -328,6 +344,30 @@ class WriteStopHookTests(unittest.TestCase):
             settings = json.loads((d / "settings.json").read_text(encoding="utf-8"))
             self.assertEqual(settings["other"], 1)  # 不覆盖既有键
             self.assertIn("Stop", settings["hooks"])
+
+    def test_preserves_existing_stop_hooks(self):
+        # 用户已有的 Stop 钩子组不能被覆盖掉（只追加 lawiki 的）。
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            d = case / ".claude"; d.mkdir()
+            (d / "settings.json").write_text(json.dumps({"hooks": {"Stop": [
+                {"hooks": [{"type": "command", "command": "my-own-hook"}]}]}}), encoding="utf-8")
+            g.write_stop_hook(case, Path("/skills/lawiki"))
+            cmds = [h["command"] for grp in
+                    json.loads((d / "settings.json").read_text(encoding="utf-8"))["hooks"]["Stop"]
+                    for h in grp["hooks"]]
+            self.assertIn("my-own-hook", cmds)              # 既有保留
+            self.assertTrue(any("stop_hook.py" in c for c in cmds))  # lawiki 追加
+
+    def test_idempotent_no_duplicate_lawiki_hook(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            g.write_stop_hook(case, Path("/skills/lawiki"))
+            g.write_stop_hook(case, Path("/skills/lawiki"))  # 跑两次
+            cmds = [h["command"] for grp in
+                    json.loads((case / ".claude" / "settings.json").read_text(encoding="utf-8"))
+                    ["hooks"]["Stop"] for h in grp["hooks"]]
+            self.assertEqual(sum("stop_hook.py" in c for c in cmds), 1)  # 不重复
 
 
 if __name__ == "__main__":

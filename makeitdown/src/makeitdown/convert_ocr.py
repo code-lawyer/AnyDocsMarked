@@ -1,5 +1,6 @@
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from .cloud_consent import has_consent, require_cloud_consent
@@ -114,8 +115,13 @@ class OCRDispatcher:
             return MinerUCloud(token=self.mineru_token)
         return None
 
-    def _ocr_at_angle(self, path: Path, angle: int) -> ConversionResult:
-        """Rotate a scanned image by ``angle`` and OCR it (for the reorient probe)."""
+    @contextmanager
+    def _oriented(self, path: Path, angle: int):
+        """Yield a path to ``path`` rotated by ``angle`` (a temp file, auto-cleaned).
+        angle 0 yields the original path unchanged (no temp, no cost)."""
+        if angle == 0:
+            yield path
+            return
         import tempfile
 
         from PIL import Image
@@ -126,15 +132,20 @@ class OCRDispatcher:
             os.close(fd)
             try:
                 rotated.save(tmp)
-                return self._resolve_backend().convert(Path(tmp))
+                yield Path(tmp)
             finally:
                 Path(tmp).unlink(missing_ok=True)
 
-    def _reorient(self, path: Path, primary: ConversionResult) -> ConversionResult:
+    def _ocr_at_angle(self, path: Path, angle: int) -> ConversionResult:
+        """Rotate a scanned image by ``angle`` and OCR it (for the reorient probe)."""
+        with self._oriented(path, angle) as p:
+            return self._resolve_backend().convert(p)
+
+    def _reorient(self, path: Path, primary: ConversionResult) -> tuple[ConversionResult, int]:
         """When a scanned image OCRs with low confidence, pick the upright angle.
-        Only image inputs are rotatable here; the primary result is never lost."""
+        Returns (chosen result, chosen angle). Only image inputs are rotatable here."""
         if path.suffix.lower() not in IMAGE_EXTS:
-            return primary
+            return primary, 0
         results = {0: primary}
 
         def probe(angle: int):
@@ -142,12 +153,16 @@ class OCRDispatcher:
             return results[angle].confidences
 
         best = resolve_best_angle(primary.confidences, probe, self.rotate_min_confidence)
-        return results.get(best, primary)
+        return results.get(best, primary), best
 
     def convert(self, path: Path) -> ConversionResult:
         result = self._resolve_backend().convert(path)
+        angle = 0
         if self.rotate:
-            result = self._reorient(path, result)
+            try:
+                result, angle = self._reorient(path, result)
+            except Exception:  # noqa: BLE001  旋转纠偏是加强项，绝不因它丢掉已成功的主结果
+                result, angle = result, 0
         if not self.cross_check:
             return result
         verifier = self._make_verifier()
@@ -155,7 +170,10 @@ class OCRDispatcher:
             result.cross_check_reasons = ["双OCR互校跳过：无可用 MinerU 校验引擎（装本地版 mineru，或设 MINERU_API_TOKEN 并加 --cloud-consent）"]
             return result
         try:
-            other = verifier.convert(path)
+            # 校验器必须 OCR 与主结果**同一朝向**的页——reorient 选了非 0 角度时，让校验器
+            # 也读旋正后的临时件，否则两引擎比的是不同朝向、误报巨大分歧。
+            with self._oriented(path, angle) as vp:
+                other = verifier.convert(vp)
             cc = compare(result.text, other.text, ratio_threshold=self.cross_check_ratio)
             result.cross_check_reasons = cc.reasons
             # other.engine is the verifier's label (MinerULocal.convert sets it to engine_label="mineru")

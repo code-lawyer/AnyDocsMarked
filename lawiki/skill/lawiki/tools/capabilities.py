@@ -152,7 +152,8 @@ def build_gui_fields(cap: dict) -> list[dict]:
         fields.append({"kind": "toggle", "id": gc, "label": cap.get("promise", "")})
     for inp in cap.get("inputs", []):
         fields.append({"kind": inp["kind"], "id": inp["id"], "label": inp["label"],
-                       "options": inp.get("options"), "required_when": inp.get("required_when")})
+                       "options": inp.get("options"), "default": inp.get("default"),
+                       "required_when": inp.get("required_when")})
     return fields
 
 

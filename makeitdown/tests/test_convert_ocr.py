@@ -213,3 +213,49 @@ def test_non_image_never_probes(monkeypatch, tmp_path):
     pdf.write_bytes(b"stub")
     d.convert(pdf)
     assert calls == []  # PDF not rotatable here → no cost even at low confidence
+
+
+def _real_png(path):
+    from PIL import Image
+    Image.new("RGB", (4, 2), "white").save(path)
+
+
+def test_reorient_error_keeps_primary(monkeypatch, tmp_path):
+    # 低置信触发重探，但 _ocr_at_angle 抛错（PIL/后端问题）→ 绝不丢已成功的主结果。
+    d = _rotate_dispatcher(monkeypatch, [0.10])
+
+    def boom(path, angle):
+        raise OSError("cannot rotate this image")
+
+    monkeypatch.setattr(d, "_ocr_at_angle", boom)
+    img = tmp_path / "scan.png"
+    _real_png(img)
+    r = d.convert(img)
+    assert r.text == "upright"  # primary preserved, not a hard failure
+
+
+def test_crosscheck_verifier_sees_rotated_orientation(monkeypatch, tmp_path):
+    # reorient 选了 90° → 校验器必须 OCR 同样旋正的页，而非原始朝向（否则两引擎比的是
+    # 不同朝向、误报巨大分歧）。
+    d = co.OCRDispatcher(engine="local", cross_check=True, cross_check_ratio=0.1)
+    monkeypatch.setattr(d, "_resolve_backend", lambda: _Backend([0.30]))
+    monkeypatch.setattr(d, "_ocr_at_angle", lambda path, angle: ConversionResult(
+        text="upright", engine="local:pp-structurev3",
+        confidences=[0.95] if angle == 90 else [0.10]))
+    seen = {}
+
+    class _V:
+        @staticmethod
+        def is_available():
+            return True
+
+        def convert(self, p):
+            seen["path"] = Path(p)
+            return ConversionResult(text="v", engine="mineru")
+
+    monkeypatch.setattr(d, "_make_verifier", lambda: _V())
+    img = tmp_path / "scan.png"
+    _real_png(img)
+    d.convert(img)
+    # 校验器收到的不是原始文件（是按选定角度旋转出的临时件）
+    assert seen["path"] != img

@@ -138,20 +138,30 @@ def build_install_argv(options: dict) -> list[str]:
     return _flags_for("install", options)
 
 
-def build_ingest_env(options: dict) -> dict[str, str]:
-    """phase=ingest 的 text/secret 类 input → 子进程环境变量（token/凭证只经 env、不落盘）。
-    仅当所属 CHOICE 启用、且用户填了值时注入。"""
+def _env_for(phase: str, options: dict) -> dict[str, str]:
+    """某 phase 里启用 CHOICE 的 env 型 input → 子进程环境变量（token/凭证/端点只经 env、
+    不落盘）。任何声明了 env 的 input（非 flag 型）都注入，不按 kind 硬编码。"""
     env: dict[str, str] = {}
-    for cap in _caps_by_phase("ingest"):
+    for cap in _caps_by_phase(phase):
         if not _cap_enabled(cap, options):
             continue
         for inp in cap.get("inputs", []):
             name = inp.get("env")
             val = options.get(inp["id"])
-            # 任何声明了 env 的 input（非 flag 型）→ 环境变量；不按 kind 硬编码。
             if name and not inp.get("flag") and val:
                 env[name] = str(val)
     return env
+
+
+def build_ingest_env(options: dict) -> dict[str, str]:
+    """phase=ingest 的凭证/token（cross-check MinerU、structure LLM）→ 子进程 env。"""
+    return _env_for("ingest", options)
+
+
+def build_install_env(options: dict) -> dict[str, str]:
+    """phase=install 的 env 型选择（如 embedding 后端 RAG_EMBED_BACKEND、本地 ollama 端点
+    RAG_OLLAMA_URL）→ 子进程 env。既供安装时探测，也在摄入建索引时确保用同一后端/端点。"""
+    return _env_for("install", options)
 
 
 def write_case_config(case: Path, options: dict) -> None:
@@ -212,8 +222,17 @@ def write_stop_hook(case: Path, skill_dir: Path) -> None:
     except (OSError, ValueError):
         settings = {}
     hooks = settings.setdefault("hooks", {})
+    stop_groups = hooks.setdefault("Stop", [])
+    if not isinstance(stop_groups, list):
+        stop_groups = []
+        hooks["Stop"] = stop_groups
     cmd = f'python "{(skill_dir / "lint" / "stop_hook.py").as_posix()}"'
-    hooks["Stop"] = [{"hooks": [{"type": "command", "command": cmd}]}]
+    # 已挂过 lawiki stop_hook 就不重复；用户自己的 Stop 钩子组一律保留（只追加）。
+    already = any("stop_hook.py" in (h.get("command") or "")
+                 for grp in stop_groups if isinstance(grp, dict)
+                 for h in grp.get("hooks", []) if isinstance(h, dict))
+    if not already:
+        stop_groups.append({"hooks": [{"type": "command", "command": cmd}]})
     path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -376,18 +395,36 @@ class IngestApp(tk.Tk):
                      fg="#c00" if red else "#a60", wraplength=580, justify="left").pack(anchor="w")
 
     def _on_install(self) -> None:
-        """按 install 期选择直接跑 install.py（GUI 确定性执行，不叫 agent 跑）。"""
-        argv = build_install_argv(self._collect_options())
+        """按 install 期选择直接跑 install.py（GUI 确定性执行，不叫 agent 跑）。同时把勾选的
+        问答后闸门在此写入案件本地 settings——它是 install 期决策，理应在「安装/检查环境」这一步
+        兑现，而不是拖到整轮摄入才生效。"""
+        options = self._collect_options()
+        # 后闸门是纯 GUI 动作（无 install.py 标志）——若勾选，此处即写案件本地 settings。
+        if options.get("enable_stop_hook"):
+            if self.case_dir is None:
+                messagebox.showwarning("缺少目录", "启用问答后闸门需先选案件目录。"); return
+            try:
+                write_stop_hook(self.case_dir, Path(__file__).resolve().parent / "skill" / "lawiki")
+            except OSError as e:
+                messagebox.showerror("写入失败", str(e)); return
+        argv = build_install_argv(options)
         if not argv:
-            messagebox.showinfo("安装环境", "未选择需安装项（在「⓪ 环境与闸门」里选 OCR 安装方式）。")
+            # 没有可装项：若刚写了后闸门，回选择屏刷新体检横幅；否则提示无操作。
+            if options.get("enable_stop_hook"):
+                messagebox.showinfo("已启用", "问答后闸门已写入案件本地 settings。")
+                self._build_choice_screen()
+            else:
+                messagebox.showinfo("安装环境", "未选择需安装项（在「⓪ 环境与闸门」里选 OCR/RAG 安装或勾选后闸门）。")
             return
         if not messagebox.askyesno("安装/检查环境",
                                    f"将运行：install.py {' '.join(argv)}\n（可能下载依赖、耗时）。继续？"):
             return
         install_py = Path(__file__).resolve().parent / "install.py"
+        env = self._base_env()
+        env.update(build_install_env(options))
         self._run_stream_screen(
             "正在安装环境…（勿关窗）", [sys.executable, str(install_py), *argv],
-            "install_done", busy=True)
+            "install_done", busy=True, env=env)
 
     def _base_env(self) -> dict:
         """子进程基础环境：强制 UTF-8，避免本机 GBK locale 把进度符号/中文写乱。"""
@@ -423,11 +460,12 @@ class IngestApp(tk.Tk):
             proc.terminate()
 
     def _run_stream_screen(self, title: str, argv: list[str], done_kind: str,
-                           busy: bool = False) -> None:
+                           busy: bool = False, env: dict | None = None) -> None:
         """新屏跑一条命令、输出流到日志框，完成后经 _pump 的 done_kind 分流。"""
         self._stream_screen(title, with_progress=False, busy=busy)
         self._thread = threading.Thread(
-            target=self._spawn_and_stream, args=(argv, self._base_env(), done_kind), daemon=True)
+            target=self._spawn_and_stream,
+            args=(argv, env or self._base_env(), done_kind), daemon=True)
         self._thread.start()
         self.after(150, self._pump)
 
@@ -467,8 +505,9 @@ class IngestApp(tk.Tk):
                 row = tk.Frame(parent); row.pack(fill="x", padx=16)
                 tk.Label(row, text=field["label"] + "：").pack(side="left")
                 if kind == "select":
-                    var.set(var.get() or (field.get("options") or [""])[0])
-                    ttk.Combobox(row, textvariable=var, values=field.get("options") or [],
+                    opts = field.get("options") or [""]
+                    var.set(var.get() or field.get("default") or opts[0])
+                    ttk.Combobox(row, textvariable=var, values=opts,
                                  state="readonly", width=16).pack(side="left")
                 else:
                     tk.Entry(row, textvariable=var, width=40,
@@ -577,7 +616,8 @@ class IngestApp(tk.Tk):
             self._q.put(("error", f"写案件配置失败：{e}")); return
         argv = [sys.executable, str(ingest_py), str(case), *build_ingest_argv(options)]
         env = self._base_env()
-        env.update(build_ingest_env(options))  # cross-check/OCR/LLM 的 token 与凭证
+        env.update(build_ingest_env(options))   # cross-check/OCR/LLM 的 token 与凭证
+        env.update(build_install_env(options))  # 本地 ollama 端点等，索引期须用同一后端/端点
         # embedding 后端也在建索引时生效（与问答同一后端，否则模型不一致会被拒）——复用
         # rag.py 的同一映射从刚写的 case.json 派生，注入 ingest 子进程。
         try:

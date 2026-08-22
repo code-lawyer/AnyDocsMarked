@@ -150,6 +150,13 @@ class BuildGuiFieldsTests(unittest.TestCase):
         self.assertEqual(fields[0]["kind"], "toggle")
         self.assertEqual(fields[1]["kind"], "secret")
 
+    def test_select_default_carried_through(self):
+        c = _choice_ingest()
+        c["inputs"] = [{"id": "pkg", "label": "包", "kind": "select",
+                        "options": ["local", "cloud"], "flag": "--ocr", "default": "cloud"}]
+        field = next(f for f in build_gui_fields(c) if f["id"] == "pkg")
+        self.assertEqual(field.get("default"), "cloud")  # 契约默认不能被丢
+
 
 class ContractKnobsTests(unittest.TestCase):
     def test_collects_flags_and_env_across_entries(self):
