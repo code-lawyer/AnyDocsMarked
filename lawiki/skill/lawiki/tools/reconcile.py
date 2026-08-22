@@ -37,9 +37,12 @@ _OS_JUNK_NAMES = {"Thumbs.db", "desktop.ini", ".DS_Store"}
 def reconcile(root: Path) -> tuple[list[str], dict[str, int]]:
     """返回 (未处置告警列表, 统计)。纯函数，便于测试。
     统计键：produced / registered / unresolved / source_total / accounted。"""
-    stats = {"produced": 0, "registered": 0, "unresolved": 0,
-             "source_total": 0, "accounted": 0}
+    stats: dict = {"produced": 0, "registered": 0, "unresolved": 0,
+                   "source_total": 0, "accounted": 0}
     unresolved: list[str] = []
+    # 结构化的逐个未处置源文件路径（原始资料/rel），供 GUI 直接读、免解析人读散文。
+    # 只含单文件遗漏，不含"源多于已处理"这类汇总。
+    unresolved_files: list[str] = []
 
     report_path = root / "_md" / "report.json"
     if not report_path.is_file():
@@ -59,6 +62,7 @@ def reconcile(root: Path) -> tuple[list[str], dict[str, int]]:
             stats["unresolved"] += 1
             label = "跳过无原因" if key in skips else "未处置源级遗漏"
             unresolved.append(f"[{label}] {SOURCE_DIR}/{rel}")
+            unresolved_files.append(_posix(f"{SOURCE_DIR}/{rel}"))
 
     # 已产出 = 成功 + 质检警告 + 增量跳过（上轮已产出 _md，本轮 skip_existing）。
     stats["produced"] = (report.get("succeeded", 0) + report.get("warned", 0)
@@ -77,6 +81,7 @@ def reconcile(root: Path) -> tuple[list[str], dict[str, int]]:
             unresolved.append(
                 f"[源多于已处理] 原始资料/ 有 {stats['source_total']} 个文件，"
                 f"report.json 仅记录 {stats['accounted']} 个——请重跑 makeitdown 原始资料 -o _md。")
+    stats["unresolved_files"] = unresolved_files
     return unresolved, stats
 
 

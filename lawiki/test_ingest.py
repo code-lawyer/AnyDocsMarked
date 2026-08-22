@@ -160,21 +160,23 @@ class RunnerTests(unittest.TestCase):
     # _run_reconcile 现在直接调 reconcile 纯函数（reconcile.py 自带纯函数测试）；
     # 这里锁映射 + 无 report.json 时的兜底。
     def test_reconcile_clean(self):
-        with mock.patch.object(ingest, "_reconcile", return_value=([], {})):
-            self.assertEqual(ingest._run_reconcile(Path("/x"), dry_run=False), [])
+        with mock.patch.object(ingest, "_reconcile", return_value=([], {"unresolved_files": []})):
+            self.assertEqual(ingest._run_reconcile(Path("/x"), dry_run=False), ([], []))
 
     def test_reconcile_unresolved(self):
-        with mock.patch.object(ingest, "_reconcile",
-                               return_value=(["[未处置源级遗漏] 原始资料/老合同.doc"], {})):
-            reasons = ingest._run_reconcile(Path("/x"), dry_run=False)
+        with mock.patch.object(ingest, "_reconcile", return_value=(
+                ["[未处置源级遗漏] 原始资料/老合同.doc"], {"unresolved_files": ["原始资料/老合同.doc"]})):
+            reasons, files = ingest._run_reconcile(Path("/x"), dry_run=False)
         self.assertEqual(reasons, ["[未处置源级遗漏] 原始资料/老合同.doc"])
+        self.assertEqual(files, ["原始资料/老合同.doc"])
 
     def test_reconcile_missing_report_returns_reason(self):
         with mock.patch.object(ingest, "_reconcile",
                                side_effect=FileNotFoundError("找不到 _md/report.json")):
-            reasons = ingest._run_reconcile(Path("/x"), dry_run=False)
+            reasons, files = ingest._run_reconcile(Path("/x"), dry_run=False)
         self.assertEqual(len(reasons), 1)
         self.assertIn("report.json", reasons[0])
+        self.assertEqual(files, [])
 
 
 class MainTests(unittest.TestCase):
@@ -195,7 +197,7 @@ class MainTests(unittest.TestCase):
                  mock.patch.object(ingest, "_run_init_case"), \
                  mock.patch.object(ingest, "_run_convert", side_effect=fake_convert), \
                  mock.patch.object(ingest, "_run_index", return_value=({"files_indexed": 1, "files_skipped": 0}, True)), \
-                 mock.patch.object(ingest, "_run_reconcile", return_value=[]):
+                 mock.patch.object(ingest, "_run_reconcile", return_value=([], [])):
                 ingest.main([str(case)])
             self.assertEqual(captured["engine"], "auto")
 
@@ -224,7 +226,7 @@ class MainTests(unittest.TestCase):
                  mock.patch.object(ingest, "_run_init_case"), \
                  mock.patch.object(ingest, "_run_convert", return_value=({"succeeded": 1, "failed": 0}, 0)), \
                  mock.patch.object(ingest, "_run_index", return_value=({"files_indexed": 1, "files_skipped": 0}, True)), \
-                 mock.patch.object(ingest, "_run_reconcile", return_value=[]):
+                 mock.patch.object(ingest, "_run_reconcile", return_value=([], [])):
                 rc = ingest.main([str(case), "--ocr-engine", "local"])
             self.assertEqual(rc, ingest.EXIT_PASS)
             merged = json.loads((case / "ingest-report.json").read_text(encoding="utf-8"))
@@ -238,7 +240,7 @@ class MainTests(unittest.TestCase):
                  mock.patch.object(ingest, "_run_init_case"), \
                  mock.patch.object(ingest, "_run_convert", return_value=({"succeeded": 1, "failed": 0}, 0)), \
                  mock.patch.object(ingest, "_run_index", return_value=({"files_indexed": 1, "files_skipped": 0}, True)), \
-                 mock.patch.object(ingest, "_run_reconcile", return_value=["[未处置源级遗漏] 原始资料/x.doc"]):
+                 mock.patch.object(ingest, "_run_reconcile", return_value=(["[未处置源级遗漏] 原始资料/x.doc"], ["原始资料/x.doc"])):
                 rc = ingest.main([str(case), "--ocr-engine", "local"])
             self.assertEqual(rc, ingest.EXIT_INCOMPLETE)
 
@@ -249,7 +251,7 @@ class MainTests(unittest.TestCase):
             with mock.patch.object(ingest.shutil, "which", return_value="mk"), \
                  mock.patch.object(ingest, "_run_init_case"), \
                  mock.patch.object(ingest, "_run_convert", return_value=({"succeeded": 1, "failed": 0}, 0)), \
-                 mock.patch.object(ingest, "_run_reconcile", return_value=[]), \
+                 mock.patch.object(ingest, "_run_reconcile", return_value=([], [])), \
                  mock.patch.object(ingest, "_run_index") as mi:
                 rc = ingest.main([str(case), "--ocr-engine", "local", "--skip-index"])
             mi.assert_not_called()
@@ -279,7 +281,7 @@ class MainSetupTests(unittest.TestCase):
                  mock.patch.object(ingest, "_run_init_case"), \
                  mock.patch.object(ingest, "_run_convert", return_value=({"succeeded": 1, "failed": 0}, 0)), \
                  mock.patch.object(ingest, "_run_index", return_value=({"files_indexed": 1, "files_skipped": 0}, True)), \
-                 mock.patch.object(ingest, "_run_reconcile", return_value=[]):
+                 mock.patch.object(ingest, "_run_reconcile", return_value=([], [])):
                 rc = ingest.main([str(case), "--ocr-engine", "local"])
             self.assertEqual(rc, ingest.EXIT_PASS)
             self.assertTrue((case / "原始资料" / "借条.txt").is_file())  # 已归入
@@ -329,10 +331,11 @@ class ReconcileIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             case = self._build_case(td)
             (case / "wiki" / "log.md").write_text("# 操作日志\n", encoding="utf-8")
-            reasons = ingest._run_reconcile(case, dry_run=False)
+            reasons, files = ingest._run_reconcile(case, dry_run=False)
         self.assertTrue(reasons)
         self.assertTrue(any("老合同.doc" in r for r in reasons))
         self.assertFalse(any(r.startswith("源级对账") for r in reasons))
+        self.assertEqual(files, ["原始资料/老合同.doc"])
 
     def test_registered_skip_resolves_to_empty(self):
         with tempfile.TemporaryDirectory() as td:
@@ -341,8 +344,9 @@ class ReconcileIntegrationTests(unittest.TestCase):
                    "## [2026-08-16] skip | 原始资料/老合同.doc\n"
                    "- 原因：needs LibreOffice\n")
             (case / "wiki" / "log.md").write_text(log, encoding="utf-8")
-            reasons = ingest._run_reconcile(case, dry_run=False)
+            reasons, files = ingest._run_reconcile(case, dry_run=False)
         self.assertEqual(reasons, [])
+        self.assertEqual(files, [])
 
 
 class SetupCaseTests(unittest.TestCase):

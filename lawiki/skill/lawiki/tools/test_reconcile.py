@@ -32,6 +32,14 @@ def test_unregistered_failure_is_unresolved(tmp_path):
     assert any("原始资料/章程.doc" in w for w in unresolved)
 
 
+def test_unresolved_files_structured(tmp_path):
+    # 结构化暴露逐个未处置源文件路径（不含"源多于已处理"汇总行）——GUI 直接读，免解析散文。
+    root = _case(tmp_path, _report(
+        failed=1, failures=[{"file": "章程.doc", "error": "no LibreOffice"}]))
+    _unresolved, stats = R.reconcile(root)
+    assert stats["unresolved_files"] == ["原始资料/章程.doc"]
+
+
 def test_registered_skip_resolves(tmp_path):
     log = ("# log\n\n"
            "## [2026-07-13] skip | 原始资料/章程.doc\n"

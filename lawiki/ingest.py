@@ -104,7 +104,8 @@ def _preflight(raw_dir: Path) -> str | None:
 
 
 def _gate_and_merge(case_dir: Path, convert: dict, index: dict, md_file_count: int,
-                    reconcile_reasons: list[str], *, index_ran: bool) -> dict:
+                    reconcile_reasons: list[str], *, index_ran: bool,
+                    unresolved_files: list[str] | None = None) -> dict:
     reasons: list[str] = []
 
     failed = convert.get("failed", 0)
@@ -142,7 +143,8 @@ def _gate_and_merge(case_dir: Path, convert: dict, index: dict, md_file_count: i
                 "succeeded", "warned", "failed",
                 "skipped_existing", "skipped_unsupported")},
             "index": index_stage,
-            "source_reconcile": {"unresolved": reconcile_reasons},
+            "source_reconcile": {"unresolved": reconcile_reasons,
+                                 "unresolved_files": unresolved_files or []},
         },
         "gate": {"passed": exit_code == EXIT_PASS, "reasons": reasons},
         "exit_code": exit_code,
@@ -241,16 +243,17 @@ def _run_index(case_dir: Path, *, dry_run: bool,
     return {"files_indexed": 0, "files_skipped": 0}, True
 
 
-def _run_reconcile(case_dir: Path, *, dry_run: bool) -> list[str]:
+def _run_reconcile(case_dir: Path, *, dry_run: bool) -> tuple[list[str], list[str]]:
+    """返回 (人读未处置原因, 结构化未处置文件路径)。结构化列表供 GUI 直接读、免解析散文。"""
     # 直接调 reconcile 的纯函数（它就是为复用而写），不再 shell out + 解析 stdout。
     _say(f"将执行: 源级对账 reconcile({case_dir.as_posix()})")
     if dry_run:
-        return []
+        return [], []
     try:
-        unresolved, _ = _reconcile(case_dir)
+        unresolved, stats = _reconcile(case_dir)
     except FileNotFoundError as e:
-        return [str(e)]
-    return unresolved
+        return [str(e)], []
+    return unresolved, stats.get("unresolved_files", [])
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -338,10 +341,11 @@ def main(argv: list[str]) -> int:
                                       parent_context=args.rag_parent_context)
         index = index or {}
 
-    reconcile_reasons = _run_reconcile(case, dry_run=False)
+    reconcile_reasons, unresolved_files = _run_reconcile(case, dry_run=False)
 
     merged = _gate_and_merge(case, convert, index, _count_md_files(md),
-                             reconcile_reasons, index_ran=index_ran)
+                             reconcile_reasons, index_ran=index_ran,
+                             unresolved_files=unresolved_files)
     merged["stages"]["setup"] = {"moved": setup_moved}
     _atomic_write_text(case / "ingest-report.json",
                        json.dumps(merged, ensure_ascii=False, indent=2))

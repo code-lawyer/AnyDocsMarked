@@ -21,6 +21,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import ingest  # 须先于 capabilities：其导入把 skill/lawiki/tools 加进 sys.path
+import install  # 复用其环境检测（_verify/_check_answer_gate_ready），不另写一套
 from capabilities import answer_persist_map, build_gui_fields, load_capabilities
 
 _PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]\s+(.)\s+(.*)$")
@@ -57,6 +58,33 @@ def summarize_report(merged: dict) -> str:
     else:
         lines.append("下一步：让 agent 加载 lawiki，对 _md/ 建 wiki。")
     return "\n".join(lines)
+
+
+def probe_environment() -> dict:
+    """开窗即体检：各组件装了没/就绪没。复用 install.py 的 shell 探活（不跨模块 import
+    引擎 Python）。best-effort——探测本身失败按"未就绪"，绝不抛异常阻塞开窗。
+    critical=True 的缺失会拦住摄入（makeitdown 缺则根本转不了）；rag 缺只降级仅 wiki。"""
+    def _safe(fn, *a):
+        try:
+            return bool(fn(*a))
+        except Exception:  # noqa: BLE001
+            return False
+    return {
+        "makeitdown": {"ok": _safe(install._verify, ["makeitdown", "--help"]),
+                       "critical": True,
+                       "hint": "转换器未装——请点「安装/检查环境」。"},
+        "rag": {"ok": _safe(install._verify, [*install._rag_cmd(), "--help"]),
+                "critical": False,
+                "hint": "语义检索未装——问答将退化为仅 wiki（可选）。"},
+        "stop_hook": {"ok": _safe(install._check_answer_gate_ready),
+                      "critical": False,
+                      "hint": "问答后闸门未启用——可在「⓪ 环境与闸门」勾选。"},
+    }
+
+
+def has_critical_gap(env: dict) -> bool:
+    """是否有 critical 组件缺失（缺则应禁用「开始摄入」）。"""
+    return any(v.get("critical") and not v.get("ok") for v in env.values())
 
 
 def _caps_by_phase(phase: str) -> list[dict]:
@@ -147,10 +175,13 @@ _UNRESOLVED_FILE_RE = re.compile(r"(原始资料/\S.*)$")
 
 def unresolved_source_files(report: dict) -> list[str]:
     """从 ingest-report 的源级对账里取出**逐个未处置源文件**的路径（原始资料/…），供 done
-    屏让用户裁决。汇总提示（原始资料/ 有 N 个…）非单文件，自动排除。"""
-    unresolved = (report.get("stages", {}).get("source_reconcile", {}) or {}).get("unresolved", [])
+    屏让用户裁决。优先读结构化字段 unresolved_files（ingest 新版直接暴露）；旧报告没有该字段
+    时回退解析人读字符串（汇总提示自动排除）。"""
+    sr = report.get("stages", {}).get("source_reconcile", {}) or {}
+    if "unresolved_files" in sr:  # 新版结构化字段，免解析散文
+        return list(sr["unresolved_files"])
     out: list[str] = []
-    for line in unresolved:
+    for line in sr.get("unresolved", []):
         m = _UNRESOLVED_FILE_RE.search(line)
         if m:
             out.append(m.group(1))
@@ -184,6 +215,54 @@ def write_stop_hook(case: Path, skill_dir: Path) -> None:
     cmd = f'python "{(skill_dir / "lint" / "stop_hook.py").as_posix()}"'
     hooks["Stop"] = [{"hooks": [{"type": "command", "command": cmd}]}]
     path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _input_empty(inp: dict, options: dict) -> bool:
+    """输入是否"未填"。bool 类：未勾（False）即未填；其余：空串即未填。"""
+    val = options.get(inp["id"])
+    if inp["kind"] == "bool":
+        return not bool(val)
+    return not str(val or "").strip()
+
+
+def validate_options(options: dict) -> list[str]:
+    """选了却缺必需输入 → 报错项（人话）。**完全契约驱动**：消费每个启用 CHOICE 的 input
+    required_when（含 OCR 引擎的 cloud_token/cloud_consent——它们就是 ocr_engine 能力的
+    inputs，required_when=engine∈[cloud]）。bool 输入未勾即视为缺。纯函数：GUI 即时红字与
+    _on_start 最终拦截共用。"""
+    errs: list[str] = []
+    for cap in load_capabilities():
+        if cap["tier"] != "CHOICE" or not _cap_enabled(cap, options):
+            continue
+        for inp in cap.get("inputs", []):
+            rw = inp.get("required_when")
+            if not rw:
+                continue
+            required = all(options.get(k) in vals for k, vals in rw.items())
+            if required and _input_empty(inp, options):
+                errs.append(f"「{inp['label']}」为必填（当前选择下需要）")
+    return errs
+
+
+def recheck_unresolved(case: Path) -> int:
+    """原地重跑源级对账、返回未处置数（复用 reconcile.reconcile 纯函数）。裁决后无需整轮
+    重摄即可确认门是否放行。取不到（缺 report 等）→ 返回 -1 让调用方提示先摄入。"""
+    try:
+        from reconcile import reconcile
+        unresolved, _ = reconcile(case)
+    except Exception:  # noqa: BLE001  缺 report/环境问题 → 不可判
+        return -1
+    return len(unresolved)
+
+
+def exit_advice(exit_code: int) -> str:
+    """把 ingest.py 的退出码翻成"发生了什么 + 建议"（人话，非裸码）。"""
+    return {
+        0: "✅ 完整性门通过。可回到对话让 agent 建 wiki。",
+        1: "转换有硬失败：见摘要/日志的 failures，修好来源后「重新摄入」。",
+        2: "前置或环境缺失：常见是未装 makeitdown、或选了云端却没加同意。请先「安装/检查环境」。",
+        3: "完整性门未过：有未处置源文件或索引不全。见下方逐个「处置」，或补装 rag 后重摄。",
+    }.get(exit_code, f"引擎退出码 {exit_code}——详见日志。")
 
 
 def build_case_config(options: dict) -> dict:
@@ -247,6 +326,7 @@ class IngestApp(tk.Tk):
 
     def _build_choice_screen(self) -> None:
         self._clear()
+        self._render_health_banner()
         tk.Label(self._container, text="① 选择案件目录（含 原始资料/）",
                  font=("", 12, "bold")).pack(anchor="w")
         row = tk.Frame(self._container); row.pack(fill="x", pady=6)
@@ -273,8 +353,27 @@ class IngestApp(tk.Tk):
                   command=self._on_install).pack(anchor="w")
         self._build_advanced_box()
 
-        tk.Button(self._container, text="开始摄入 ▶", font=("", 12, "bold"),
-                  command=self._on_start).pack(pady=16)
+        self._start_btn = tk.Button(self._container, text="开始摄入 ▶", font=("", 12, "bold"),
+                                    command=self._on_start)
+        self._start_btn.pack(pady=16)
+        if has_critical_gap(self._health):
+            self._start_btn.config(state="disabled")
+            tk.Label(self._container, text="⛔ 缺关键组件，请先「安装/检查环境」再摄入",
+                     fg="#c00").pack()
+
+    def _render_health_banner(self) -> None:
+        """开窗即体检横幅：绿=全就绪 / 黄=缺可选（降级）/ 红=缺关键（拦摄入）。"""
+        self._health = probe_environment()
+        gaps = [v["hint"] for v in self._health.values() if not v["ok"]]
+        if not gaps:
+            tk.Label(self._container, text="✓ 环境就绪", fg="#080").pack(anchor="w")
+            return
+        red = has_critical_gap(self._health)
+        tk.Label(self._container, text=("⛔ 环境缺件" if red else "⚠ 环境提示"),
+                 fg="#c00" if red else "#a60", font=("", 11, "bold")).pack(anchor="w")
+        for hint in gaps:
+            tk.Label(self._container, text="  • " + hint,
+                     fg="#c00" if red else "#a60", wraplength=580, justify="left").pack(anchor="w")
 
     def _on_install(self) -> None:
         """按 install 期选择直接跑 install.py（GUI 确定性执行，不叫 agent 跑）。"""
@@ -287,31 +386,46 @@ class IngestApp(tk.Tk):
             return
         install_py = Path(__file__).resolve().parent / "install.py"
         self._run_stream_screen(
-            "正在安装环境…（勿关窗）", [sys.executable, str(install_py), *argv], "install_done")
+            "正在安装环境…（勿关窗）", [sys.executable, str(install_py), *argv],
+            "install_done", busy=True)
 
     def _base_env(self) -> dict:
         """子进程基础环境：强制 UTF-8，避免本机 GBK locale 把进度符号/中文写乱。"""
         env = os.environ.copy(); env.setdefault("PYTHONUTF8", "1")
         return env
 
-    def _stream_screen(self, title: str, with_progress: bool) -> None:
-        """跑命令屏的共用骨架：清屏 + 标题 + 日志框（可选进度条/状态行）。摄入屏与安装屏
-        都经此，避免两份 scaffold；无进度条时把 _bar/_stat 置 None（不留上一屏的残留引用）。"""
+    def _stream_screen(self, title: str, with_progress: bool, busy: bool = False) -> None:
+        """跑命令屏的共用骨架：清屏 + 标题 + 日志框。with_progress=确定性进度条（摄入，
+        靠 [N/M]）；busy=不确定 marquee（安装，子进程无结构化进度、避免看着像死机）。
+        无进度条时把 _bar/_stat 置 None（不留上一屏残留引用）。"""
         self._clear()
         tk.Label(self._container, text=title, font=("", 12, "bold")).pack(anchor="w")
         self._bar = None
         self._stat = None
+        self._marquee = None
         if with_progress:
             self._bar = ttk.Progressbar(self._container, mode="determinate", maximum=1)
             self._bar.pack(fill="x", pady=8)
             self._stat = tk.Label(self._container, text="启动中…", fg="#333")
             self._stat.pack(anchor="w")
+        elif busy:
+            self._marquee = ttk.Progressbar(self._container, mode="indeterminate")
+            self._marquee.pack(fill="x", pady=8)
+            self._marquee.start(12)
         self._logbox = tk.Text(self._container, height=16, wrap="none")
         self._logbox.pack(fill="both", expand=True, pady=8)
+        tk.Button(self._container, text="中止", command=self._on_abort).pack(anchor="w")
 
-    def _run_stream_screen(self, title: str, argv: list[str], done_kind: str) -> None:
+    def _on_abort(self) -> None:
+        """中止正在跑的子进程；线程读完管道后经 _pump 收尾回选择屏。"""
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+
+    def _run_stream_screen(self, title: str, argv: list[str], done_kind: str,
+                           busy: bool = False) -> None:
         """新屏跑一条命令、输出流到日志框，完成后经 _pump 的 done_kind 分流。"""
-        self._stream_screen(title, with_progress=False)
+        self._stream_screen(title, with_progress=False, busy=busy)
         self._thread = threading.Thread(
             target=self._spawn_and_stream, args=(argv, self._base_env(), done_kind), daemon=True)
         self._thread.start()
@@ -416,8 +530,9 @@ class IngestApp(tk.Tk):
     def _on_start(self) -> None:
         if self.case_dir is None:
             messagebox.showwarning("缺少目录", "请先选择案件目录。"); return
-        if self.engine.get() == "cloud" and not self.consent.get():
-            messagebox.showwarning("需要同意", "云端会上传文档，请勾选同意，或改用 本地/auto。"); return
+        errs = validate_options(self._collect_options())
+        if errs:
+            messagebox.showwarning("请先补全", "\n".join("• " + e for e in errs)); return
         # 只要还有散落待归入项就弹确认（不论 原始资料/ 是否已存在——已建库后再扔的
         # 新文件同样会被移动，同样该让用户确认）。
         n = self._movable_count()
@@ -487,10 +602,13 @@ class IngestApp(tk.Tk):
                     messagebox.showerror("启动失败", payload)
                     self._build_choice_screen(); return
                 elif kind == "install_done":
+                    if self._marquee is not None:
+                        self._marquee.stop()
                     ok = payload == 0
                     (messagebox.showinfo if ok else messagebox.showwarning)(
                         "安装环境", "环境安装/检查完成。" if ok else
                         f"install.py 退出码 {payload}——部分组件可能未装好，详见日志。")
+                    # 回选择屏会重跑 probe_environment 刷新横幅，用户立刻看到新状态。
                     self._build_choice_screen(); return
                 elif kind == "done":
                     self._build_done_screen(payload); return
@@ -521,6 +639,7 @@ class IngestApp(tk.Tk):
         else:
             summary = f"引擎退出码 {exit_code}，但未找到 ingest-report.json（可能前置失败）。"
         tk.Label(self._container, text="摄入结束", font=("", 13, "bold")).pack(anchor="w")
+        summary = summary + "\n\n" + exit_advice(exit_code)  # 裸退出码翻成人话建议
         box = tk.Text(self._container, height=10, wrap="word")
         box.insert("1.0", summary); box.config(state="disabled")
         box.pack(fill="both", expand=True, pady=8)
@@ -532,6 +651,8 @@ class IngestApp(tk.Tk):
             tk.Button(row, text="打开报告位置",
                       command=lambda: webbrowser.open(report_path.parent.as_uri())).pack(side="left")
         tk.Button(row, text="重新摄入", command=self._build_choice_screen).pack(side="left", padx=6)
+        if exit_code == 0:
+            tk.Button(row, text="拷贝下一步", command=self._copy_handoff).pack(side="left", padx=6)
         tk.Button(row, text="关闭", command=self.destroy).pack(side="right")
         if exit_code != 0:
             messagebox.showwarning("完整性提醒",
@@ -556,6 +677,8 @@ class IngestApp(tk.Tk):
             tk.Label(r, text="←填跳过原因", fg="#888").pack(side="left", padx=2)
             tk.Button(r, text="登记跳过",
                       command=lambda x=rel: self._on_register_skip(x)).pack(side="left", padx=4)
+        tk.Button(self._container, text="复验完整性",
+                  command=self._on_recheck).pack(anchor="w", pady=(4, 0))
 
     def _on_register_skip(self, rel: str) -> None:
         reason = self._disp_reason[rel].get().strip()
@@ -566,7 +689,25 @@ class IngestApp(tk.Tk):
             append_skip_log(self.case_dir, rel, reason)
         except OSError as e:
             messagebox.showerror("写入失败", str(e)); return
-        messagebox.showinfo("已登记", f"{rel} 已登记跳过。重跑源级对账即放行；可点「重新摄入」复核。")
+        messagebox.showinfo("已登记", f"{rel} 已登记跳过。点「复验完整性」确认门是否放行。")
+
+    def _copy_handoff(self) -> None:
+        """把"回对话让 agent 建 wiki + 案件路径"拷进剪贴板，减少用户思考下一步。"""
+        text = (f"摄入已完成（{self.case_dir}）。请加载 lawiki，对该案件 _md/ 建 wiki，"
+                f"再就本案做交叉验证问答。")
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        messagebox.showinfo("已拷贝", "下一步提示已复制到剪贴板，回到对话粘给 agent 即可。")
+
+    def _on_recheck(self) -> None:
+        """原地重跑源级对账（不必整轮重摄），把结果告诉用户。"""
+        n = recheck_unresolved(self.case_dir)
+        if n < 0:
+            messagebox.showwarning("无法复验", "未找到转换报告，请先「重新摄入」。")
+        elif n == 0:
+            messagebox.showinfo("复验通过", "✅ 已无未处置源文件，完整性门放行。可让 agent 建 wiki。")
+        else:
+            messagebox.showwarning("仍有未处置", f"还有 {n} 个未处置源文件，请继续处置或补转。")
 
 
 def main(argv: list[str] | None = None) -> int:

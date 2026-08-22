@@ -184,6 +184,14 @@ class UnresolvedDispositionTests(unittest.TestCase):
     def test_empty_report_yields_none(self):
         self.assertEqual(g.unresolved_source_files({}), [])
 
+    def test_prefers_structured_field_over_prose(self):
+        # 新版报告带结构化 unresolved_files → 直接用，不解析人读字符串。
+        report = {"stages": {"source_reconcile": {
+            "unresolved": ["[随便改的措辞] 原始资料/x.pdf"],
+            "unresolved_files": ["原始资料/合同.pdf", "原始资料/笔录.doc"]}}}
+        self.assertEqual(g.unresolved_source_files(report),
+                         ["原始资料/合同.pdf", "原始资料/笔录.doc"])
+
     def test_append_skip_log_writes_reconcile_parseable_entry(self):
         with tempfile.TemporaryDirectory() as td:
             case = Path(td)
@@ -197,6 +205,108 @@ class UnresolvedDispositionTests(unittest.TestCase):
             from lint import _load_skips
             skips = _load_skips(case)
             self.assertTrue(skips.get("原始资料/合同.pdf"))
+
+
+class ValidateOptionsTests(unittest.TestCase):
+    def test_cloud_without_token_flagged(self):
+        errs = g.validate_options({"engine": "cloud", "cloud_consent": True, "cloud_token": ""})
+        self.assertTrue(any("token" in e.lower() for e in errs))
+
+    def test_cloud_without_consent_flagged(self):
+        errs = g.validate_options({"engine": "cloud", "cloud_consent": False, "cloud_token": "T"})
+        self.assertTrue(any("同意" in e for e in errs))
+
+    def test_cloud_fully_configured_ok(self):
+        errs = g.validate_options({"engine": "cloud", "cloud_consent": True, "cloud_token": "T"})
+        self.assertEqual(errs, [])
+
+    def test_local_engine_needs_nothing(self):
+        self.assertEqual(g.validate_options({"engine": "local"}), [])
+
+    def test_required_when_missing_input_flagged(self):
+        # 勾双 OCR 互校 + 云端模式，但没填 MinerU token → required_when 触发
+        errs = g.validate_options({"engine": "local", "cross_check": True,
+                                   "cross_check_mode": "cloud", "mineru_token": ""})
+        self.assertTrue(any("MinerU" in e or "mineru" in e.lower() for e in errs))
+
+    def test_required_when_satisfied_ok(self):
+        errs = g.validate_options({"engine": "local", "cross_check": True,
+                                   "cross_check_mode": "local"})  # local 校验器不需 token
+        self.assertEqual(errs, [])
+
+
+class RecheckUnresolvedTests(unittest.TestCase):
+    def _case_with_skip(self, td, registered_reason=None):
+        case = Path(td)
+        (case / "_md").mkdir()
+        # report.json: one failed conversion → one unresolved source file
+        (case / "_md" / "report.json").write_text(json.dumps({
+            "succeeded": 0, "warned": 0, "failed": 1, "skipped_existing": 0,
+            "skipped_unsupported": 0,
+            "failures": [{"file": "合同.pdf", "error": "boom"}], "skipped": [],
+        }, ensure_ascii=False), encoding="utf-8")
+        (case / "原始资料").mkdir()
+        (case / "原始资料" / "合同.pdf").write_bytes(b"x")
+        (case / "wiki").mkdir()
+        if registered_reason:
+            g.append_skip_log(case, "原始资料/合同.pdf", registered_reason)
+        return case
+
+    def test_unresolved_before_registration(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._case_with_skip(td)
+            self.assertEqual(g.recheck_unresolved(case), 1)
+
+    def test_zero_after_registration(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = self._case_with_skip(td, registered_reason="重复扫描件")
+            self.assertEqual(g.recheck_unresolved(case), 0)
+
+
+class ExitAdviceTests(unittest.TestCase):
+    def test_code_2_mentions_install_or_consent(self):
+        adv = g.exit_advice(2)
+        self.assertTrue("安装" in adv or "同意" in adv)
+
+    def test_code_3_mentions_integrity(self):
+        self.assertIn("完整性", g.exit_advice(3))
+
+    def test_code_0_is_pass(self):
+        self.assertTrue(g.exit_advice(0))
+
+
+class ProbeEnvironmentTests(unittest.TestCase):
+    def _probe(self, mk, rg, gate=False):
+        # mk/rg: whether makeitdown / rag-retriever verify as available
+        def fake_verify(cmd):
+            head = cmd[0] if cmd else ""
+            if "makeitdown" in head:
+                return mk
+            return rg  # rag-retriever (via _rag_cmd) --help
+
+        with mock.patch.object(g.install, "_verify", fake_verify), \
+             mock.patch.object(g.install, "_check_answer_gate_ready", lambda: gate):
+            return g.probe_environment()
+
+    def test_makeitdown_missing_is_critical(self):
+        env = self._probe(mk=False, rg=True)
+        self.assertFalse(env["makeitdown"]["ok"])
+        self.assertTrue(env["makeitdown"]["critical"])
+
+    def test_rag_missing_is_not_critical(self):
+        env = self._probe(mk=True, rg=False)
+        self.assertFalse(env["rag"]["ok"])
+        self.assertFalse(env["rag"]["critical"])
+
+    def test_all_present(self):
+        env = self._probe(mk=True, rg=True, gate=True)
+        self.assertTrue(env["makeitdown"]["ok"])
+        self.assertTrue(env["rag"]["ok"])
+        self.assertTrue(env["stop_hook"]["ok"])
+
+    def test_has_critical_blocker_helper(self):
+        self.assertTrue(g.has_critical_gap(self._probe(mk=False, rg=True)))
+        self.assertFalse(g.has_critical_gap(self._probe(mk=True, rg=False)))
 
 
 class WriteStopHookTests(unittest.TestCase):
