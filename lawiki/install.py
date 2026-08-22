@@ -205,22 +205,30 @@ def _default_settings_paths() -> list[Path]:
             cwd / ".claude" / "settings.local.json"]
 
 
+def settings_has_stop_hook(data: dict) -> bool:
+    """内存中的 settings dict 是否已挂 lawiki stop_hook（hooks.Stop[].hooks[].command 引用
+    stop_hook）——按结构匹配而非整串 grep，免得别处偶然出现 'stop_hook' 就误报。检测端
+    （_check_answer_gate_ready）与写入端（GUI write_stop_hook 去重）共用此一处，钩子结构
+    若变只改这里。"""
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    stop_groups = hooks.get("Stop") if isinstance(hooks, dict) else None
+    for group in stop_groups or []:
+        for hook in (group.get("hooks") or []) if isinstance(group, dict) else []:
+            if isinstance(hook, dict) and "stop_hook" in (hook.get("command") or ""):
+                return True
+    return False
+
+
 def _check_answer_gate_ready(settings_paths: list[Path] | None = None) -> bool:
-    """探测问答后闸门（stop_hook）是否已挂进 Claude Code settings 的 Stop 钩子。
-    按 setup.md 记录的结构匹配（hooks.Stop[].hooks[].command 引用 stop_hook）——
-    而非整串 grep，免得别处偶然出现 'stop_hook' 就误报就绪。best-effort：读不到/
-    解析失败按未就绪，绝不抛异常、绝不自动写入用户配置（尊重不侵入）。"""
+    """探测问答后闸门（stop_hook）是否已挂进 Claude Code settings 的 Stop 钩子。best-effort：
+    读不到/解析失败按未就绪，绝不抛异常、绝不自动写入用户配置（尊重不侵入）。"""
     for p in (settings_paths if settings_paths is not None else _default_settings_paths()):
         try:
             data = json.loads(Path(p).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        hooks = data.get("hooks") if isinstance(data, dict) else None
-        stop_groups = hooks.get("Stop") if isinstance(hooks, dict) else None
-        for group in stop_groups or []:
-            for hook in (group.get("hooks") or []) if isinstance(group, dict) else []:
-                if isinstance(hook, dict) and "stop_hook" in (hook.get("command") or ""):
-                    return True
+        if settings_has_stop_hook(data):
+            return True
     return False
 
 

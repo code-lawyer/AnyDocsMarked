@@ -243,7 +243,8 @@
           "embed_backend": [
             "ollama"
           ]
-        }
+        },
+        "answer_persist": true
       }
     ]
   },

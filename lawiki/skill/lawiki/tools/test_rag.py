@@ -209,6 +209,15 @@ class AnswerEnvFromCaseTests(unittest.TestCase):
             self.assertEqual(rag.answer_env_from_case(case), {
                 "RAG_RERANK": "local", "RAG_MIN_SCORE": "0.3", "RAG_EMBED_BACKEND": "ollama"})
 
+    def test_ollama_url_persisted_reaches_query_time(self):
+        # ollama_url 是 answer_persist → 问答期也注入 RAG_OLLAMA_URL（否则自定义端口在
+        # 查询时静默回落 localhost，与索引期不一致）。
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            self._write(case, {"embed_backend": "ollama", "ollama_url": "http://127.0.0.1:9999"})
+            env = rag.answer_env_from_case(case)
+            self.assertEqual(env.get("RAG_OLLAMA_URL"), "http://127.0.0.1:9999")
+
     def test_absent_config_is_empty(self):
         with tempfile.TemporaryDirectory() as td:
             self.assertEqual(rag.answer_env_from_case(Path(td)), {})

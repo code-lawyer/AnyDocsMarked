@@ -227,11 +227,9 @@ def write_stop_hook(case: Path, skill_dir: Path) -> None:
         stop_groups = []
         hooks["Stop"] = stop_groups
     cmd = f'python "{(skill_dir / "lint" / "stop_hook.py").as_posix()}"'
-    # 已挂过 lawiki stop_hook 就不重复；用户自己的 Stop 钩子组一律保留（只追加）。
-    already = any("stop_hook.py" in (h.get("command") or "")
-                 for grp in stop_groups if isinstance(grp, dict)
-                 for h in grp.get("hooks", []) if isinstance(h, dict))
-    if not already:
+    # 已挂过 lawiki stop_hook 就不重复；用户自己的 Stop 钩子组一律保留（只追加）。检测复用
+    # install.settings_has_stop_hook（与就绪检测同一处结构判定，不另写一份遍历）。
+    if not install.settings_has_stop_hook(settings):
         stop_groups.append({"hooks": [{"type": "command", "command": cmd}]})
     path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -617,9 +615,9 @@ class IngestApp(tk.Tk):
         argv = [sys.executable, str(ingest_py), str(case), *build_ingest_argv(options)]
         env = self._base_env()
         env.update(build_ingest_env(options))   # cross-check/OCR/LLM 的 token 与凭证
-        env.update(build_install_env(options))  # 本地 ollama 端点等，索引期须用同一后端/端点
-        # embedding 后端也在建索引时生效（与问答同一后端，否则模型不一致会被拒）——复用
-        # rag.py 的同一映射从刚写的 case.json 派生，注入 ingest 子进程。
+        # embedding 后端 + 本地 ollama 端点在建索引时也须生效（与问答同一后端/端点，否则模型
+        # 不一致会被拒）。二者均 answer_persist，已写入 case.json——复用 rag.py 的同一映射从
+        # case.json 派生注入，与问答期 _run_rag 走同一条路（单一来源，不再从 options 另注一遍）。
         try:
             from rag import answer_env_from_case
             env.update(answer_env_from_case(case))

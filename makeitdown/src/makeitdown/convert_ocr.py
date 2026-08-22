@@ -162,7 +162,7 @@ class OCRDispatcher:
             try:
                 result, angle = self._reorient(path, result)
             except Exception:  # noqa: BLE001  旋转纠偏是加强项，绝不因它丢掉已成功的主结果
-                result, angle = result, 0
+                pass  # result 仍是主结果、angle 仍为 0（元组赋值失败不会改到二者）
         if not self.cross_check:
             return result
         verifier = self._make_verifier()
