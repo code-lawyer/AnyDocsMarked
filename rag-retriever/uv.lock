@@ -2262,7 +2262,7 @@ wheels = [
 
 [[package]]
 name = "rag-retriever"
-version = "1.8.0"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastembed" },

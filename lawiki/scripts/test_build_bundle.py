@@ -50,10 +50,10 @@ class NameTests(unittest.TestCase):
         self.assertEqual(
             build_bundle._component_versions(),
             {
-                "makeitdown": "1.8.0",
-                "makeitdown.__version__": "1.8.0",
-                "rag-retriever": "1.8.0",
-                "rag-retriever.__version__": "1.8.0",
+                "makeitdown": "2.0.0",
+                "makeitdown.__version__": "2.0.0",
+                "rag-retriever": "2.0.0",
+                "rag-retriever.__version__": "2.0.0",
             },
         )
 

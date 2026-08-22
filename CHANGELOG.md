@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 2.0.0 - 2026-08-21
+
+> **破坏性变更（主版本）**：移除 rag-retriever 的云端 embedding 后端（`openai` /
+> 远程 ollama）——embedding 只可能在本机算。已用云端 embedding 配置的部署需迁回
+> `local`（内置）或**本地** ollama。详见下方 Changed/Removed。
+
 ### Changed / Removed
 
 - **移除云端 embedding 后端(隐私收束,破坏性变更)**:rag-retriever 删除 `openai` 后端与远程 ollama 支持——embedding 只可能在本机算,案件正文永不因建索引而外传。合法 `RAG_EMBED_BACKEND` 收敛为 `local`(内置 `bge-small-zh`,离线) / `ollama`(本地服务 `bge-m3`);非 loopback `RAG_OLLAMA_URL` 无条件硬拒(去掉 `RAG_CLOUD_CONSENT` 逃生口)。删除 `RAG_OPENAI_API_KEY`/`RAG_OPENAI_BASE_URL`/`RAG_CLOUD_CONSENT`。想要 bge-m3 质量走本地 ollama,无需上云。
