@@ -137,16 +137,21 @@ def write_case_config(case: Path, options: dict) -> None:
     (d / "case.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-_UNRESOLVED_FILE_RE = re.compile(r"^\[(?:未处置源级遗漏|跳过无原因)\]\s+(原始资料/\S.*)$")
+# 只锚定稳定的 原始资料/<路径> 结构（SOURCE_DIR 是产品核心约定），不锚定 reconcile 的
+# 中文标签措辞——那不是稳定契约（reconcile 用「未处置源级遗漏」、lint 用「未处置」）。汇总行
+# 「原始资料/ 有 N 个…」的 / 后是空格，\S 天然不匹配、自动排除。
+# （理想形态是 reconcile/ingest 在报告里结构化暴露未处置文件列表，GUI 直接读，免解析散文；
+#  见 spec 后续。此处先去掉最脆的标签耦合。）
+_UNRESOLVED_FILE_RE = re.compile(r"(原始资料/\S.*)$")
 
 
 def unresolved_source_files(report: dict) -> list[str]:
     """从 ingest-report 的源级对账里取出**逐个未处置源文件**的路径（原始资料/…），供 done
-    屏让用户裁决。"[源多于已处理]" 那类是汇总提示、非单文件，排除。"""
+    屏让用户裁决。汇总提示（原始资料/ 有 N 个…）非单文件，自动排除。"""
     unresolved = (report.get("stages", {}).get("source_reconcile", {}) or {}).get("unresolved", [])
     out: list[str] = []
     for line in unresolved:
-        m = _UNRESOLVED_FILE_RE.match(line)
+        m = _UNRESOLVED_FILE_RE.search(line)
         if m:
             out.append(m.group(1))
     return out
@@ -284,18 +289,37 @@ class IngestApp(tk.Tk):
         self._run_stream_screen(
             "正在安装环境…（勿关窗）", [sys.executable, str(install_py), *argv], "install_done")
 
-    def _run_stream_screen(self, title: str, argv: list[str], done_kind: str) -> None:
-        """通用：新屏跑一条命令、把输出流到日志框，完成后经 _pump 的 done_kind 分流。"""
+    def _base_env(self) -> dict:
+        """子进程基础环境：强制 UTF-8，避免本机 GBK locale 把进度符号/中文写乱。"""
+        env = os.environ.copy(); env.setdefault("PYTHONUTF8", "1")
+        return env
+
+    def _stream_screen(self, title: str, with_progress: bool) -> None:
+        """跑命令屏的共用骨架：清屏 + 标题 + 日志框（可选进度条/状态行）。摄入屏与安装屏
+        都经此，避免两份 scaffold；无进度条时把 _bar/_stat 置 None（不留上一屏的残留引用）。"""
         self._clear()
         tk.Label(self._container, text=title, font=("", 12, "bold")).pack(anchor="w")
-        self._logbox = tk.Text(self._container, height=18, wrap="none")
+        self._bar = None
+        self._stat = None
+        if with_progress:
+            self._bar = ttk.Progressbar(self._container, mode="determinate", maximum=1)
+            self._bar.pack(fill="x", pady=8)
+            self._stat = tk.Label(self._container, text="启动中…", fg="#333")
+            self._stat.pack(anchor="w")
+        self._logbox = tk.Text(self._container, height=16, wrap="none")
         self._logbox.pack(fill="both", expand=True, pady=8)
-        self._thread = threading.Thread(target=self._stream_worker, args=(argv, done_kind), daemon=True)
+
+    def _run_stream_screen(self, title: str, argv: list[str], done_kind: str) -> None:
+        """新屏跑一条命令、输出流到日志框，完成后经 _pump 的 done_kind 分流。"""
+        self._stream_screen(title, with_progress=False)
+        self._thread = threading.Thread(
+            target=self._spawn_and_stream, args=(argv, self._base_env(), done_kind), daemon=True)
         self._thread.start()
         self.after(150, self._pump)
 
-    def _stream_worker(self, argv: list[str], done_kind: str) -> None:
-        env = os.environ.copy(); env.setdefault("PYTHONUTF8", "1")
+    def _spawn_and_stream(self, argv: list[str], env: dict, done_kind: str) -> None:
+        """跑子进程、逐行送进队列、以 done_kind 收尾。摄入与安装两个 worker 共用同一套
+        Popen 参数（encoding/bufsize/stderr 合流），一处改处处一致。"""
         try:
             proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, encoding="utf-8", errors="replace", bufsize=1, env=env)
@@ -406,15 +430,7 @@ class IngestApp(tk.Tk):
         self._build_run_screen()
 
     def _build_run_screen(self) -> None:
-        self._clear()
-        tk.Label(self._container, text="正在摄入…（可后台运行，勿关窗）",
-                 font=("", 12, "bold")).pack(anchor="w")
-        self._bar = ttk.Progressbar(self._container, mode="determinate", maximum=1)
-        self._bar.pack(fill="x", pady=8)
-        self._stat = tk.Label(self._container, text="启动中…", fg="#333")
-        self._stat.pack(anchor="w")
-        self._logbox = tk.Text(self._container, height=16, wrap="none")
-        self._logbox.pack(fill="both", expand=True, pady=8)
+        self._stream_screen("正在摄入…（可后台运行，勿关窗）", with_progress=True)
         # tk.Variable.get() 走 Tcl，只能在主线程调用；在此（主线程）快照成普通 Python
         # 值再传给 worker 线程，worker 绝不碰 self.*.get()。
         options = self._collect_options()
@@ -445,11 +461,7 @@ class IngestApp(tk.Tk):
         except OSError as e:
             self._q.put(("error", f"写案件配置失败：{e}")); return
         argv = [sys.executable, str(ingest_py), str(case), *build_ingest_argv(options)]
-        env = os.environ.copy()
-        # makeitdown 等子进程把进度符号（✓⚠✗=→）写到 stderr；GUI 按 UTF-8 解码
-        # 管道，子进程若落到本地 GBK locale 会乱码甚至 UnicodeEncodeError，逼它
-        # 全程 UTF-8 才能对齐。
-        env.setdefault("PYTHONUTF8", "1")
+        env = self._base_env()
         env.update(build_ingest_env(options))  # cross-check/OCR/LLM 的 token 与凭证
         # embedding 后端也在建索引时生效（与问答同一后端，否则模型不一致会被拒）——复用
         # rag.py 的同一映射从刚写的 case.json 派生，注入 ingest 子进程。
@@ -458,17 +470,7 @@ class IngestApp(tk.Tk):
             env.update(answer_env_from_case(case))
         except Exception:  # noqa: BLE001  取不到就用默认后端，不阻断摄入
             pass
-        try:
-            proc = subprocess.Popen(
-                argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace", bufsize=1, env=env)
-        except Exception as e:  # noqa: BLE001
-            self._q.put(("error", str(e))); return
-        self._proc = proc
-        for line in proc.stdout:  # type: ignore[union-attr]
-            self._q.put(("line", line.rstrip("\n")))
-        proc.wait()
-        self._q.put(("done", proc.returncode))
+        self._spawn_and_stream(argv, env, "done")
 
     def _pump(self) -> None:
         try:
@@ -478,7 +480,7 @@ class IngestApp(tk.Tk):
                     self._logbox.insert("end", payload + "\n")
                     self._logbox.see("end")
                     prog = parse_progress_line(payload)
-                    if prog and hasattr(self, "_bar"):  # install 流没有进度条
+                    if prog and self._bar is not None:  # install 流没有进度条
                         self._bar.config(maximum=prog["total"], value=prog["done"])
                         self._stat.config(text=f"{prog['done']}/{prog['total']} · {prog['path']}")
                 elif kind == "error":
@@ -505,11 +507,17 @@ class IngestApp(tk.Tk):
     def _build_done_screen(self, exit_code: int) -> None:
         self._clear()
         report_path = (self.case_dir / "ingest-report.json") if self.case_dir else None
+        # 只读+解析报告一次，摘要与"未处置裁决"共用；解析失败或缺文件 → report=None。
+        report: dict | None = None
         if report_path and report_path.is_file():
             try:
-                summary = summarize_report(json.loads(report_path.read_text(encoding="utf-8")))
+                report = json.loads(report_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                summary = f"找到 ingest-report.json 但无法解析（可能写入中断）。引擎退出码 {exit_code}。"
+                report = None
+        if report is not None:
+            summary = summarize_report(report)
+        elif report_path and report_path.is_file():
+            summary = f"找到 ingest-report.json 但无法解析（可能写入中断）。引擎退出码 {exit_code}。"
         else:
             summary = f"引擎退出码 {exit_code}，但未找到 ingest-report.json（可能前置失败）。"
         tk.Label(self._container, text="摄入结束", font=("", 13, "bold")).pack(anchor="w")
@@ -517,13 +525,7 @@ class IngestApp(tk.Tk):
         box.insert("1.0", summary); box.config(state="disabled")
         box.pack(fill="both", expand=True, pady=8)
 
-        report = {}
-        if report_path and report_path.is_file():
-            try:
-                report = json.loads(report_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                report = {}
-        self._build_disposition_box(unresolved_source_files(report))
+        self._build_disposition_box(unresolved_source_files(report or {}))
 
         row = tk.Frame(self._container); row.pack(fill="x")
         if report_path and report_path.is_file():
