@@ -112,6 +112,30 @@ def test_ocr_unavailable_keeps_marker_and_puts_reason_in_notices(monkeypatch, tm
     ]
 
 
+def test_ocr_unavailable_with_consent_does_not_claim_consent_is_off(monkeypatch, tmp_path):
+    _patch_extract(
+        monkeypatch,
+        [
+            _page(0, "Article 3 50,000.00", False),
+            _page(1, "", True),
+        ],
+    )
+    _patch_render(monkeypatch)
+
+    class Disp:
+        def convert(self, path):
+            raise OCRUnavailableError("no engine")
+
+    result = read_pdf(tmp_path / "a.pdf", dispatcher=Disp(), cloud_consent=True)
+    assert result is not None
+    assert result.notices is not None
+    joined = "\n".join(result.notices)
+    assert "2" in joined
+    assert "consent is off" not in joined
+    assert result.notices == ["pdf page 2 needs OCR; OCR engine unavailable"]
+    assert "consent is off" not in result.text
+
+
 def test_conversion_unavailable_uses_the_same_blank_page_notice(monkeypatch, tmp_path):
     _patch_extract(monkeypatch, [_page(0, "kept", False), _page(1, "", True)])
     _patch_render(monkeypatch)
@@ -124,9 +148,8 @@ def test_conversion_unavailable_uses_the_same_blank_page_notice(monkeypatch, tmp
     assert result is not None
     assert result.text == "<!-- page: 1 -->\nkept\n<!-- page: 2 -->\n"
     assert "需要 OCR" not in result.text
-    assert result.notices == [
-        "pdf page 2 needs OCR; local engine unavailable and cloud consent is off"
-    ]
+    assert result.notices == ["pdf page 2 needs OCR; OCR engine unavailable"]
+    assert "consent is off" not in "\n".join(result.notices)
 
 
 def test_all_trusted_pages_use_pdf_inspector_and_skip_dispatcher(monkeypatch, tmp_path):

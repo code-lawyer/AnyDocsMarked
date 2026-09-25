@@ -6,7 +6,10 @@ from pathlib import Path
 from .models import ConversionResult, ConversionUnavailable, OCRUnavailableError
 from .pages import join_pages
 
-_OCR_NOTICE = "pdf page {n} needs OCR; local engine unavailable and cloud consent is off"
+_OCR_NOTICE_NO_CONSENT = (
+    "pdf page {n} needs OCR; local engine unavailable and cloud consent is off"
+)
+_OCR_NOTICE_ENGINE = "pdf page {n} needs OCR; OCR engine unavailable"
 
 
 def _extract_pages(path: Path):
@@ -35,9 +38,9 @@ def read_pdf(path: Path, *, dispatcher, cloud_consent: bool) -> ConversionResult
     """Read one PDF page at a time, or None to keep today's whole-file path.
 
     None means pdf-inspector is missing, extraction raised, or every page needs
-    OCR (or its markdown is empty after stripping). ``cloud_consent`` is part of
-    the call contract only: this function does not upload, and the dispatcher
-    already applies that policy.
+    OCR (or its markdown is empty after stripping). This function does not
+    upload. An unavailable OCR page says consent is off only when
+    ``cloud_consent`` is false.
     """
     path = Path(path)
     try:
@@ -64,7 +67,8 @@ def read_pdf(path: Path, *, dispatcher, cloud_consent: bool) -> ConversionResult
                 ocr_result = dispatcher.convert(dest)
             except (OCRUnavailableError, ConversionUnavailable):
                 parts.append("")
-                notices.append(_OCR_NOTICE.format(n=n))
+                template = _OCR_NOTICE_NO_CONSENT if not cloud_consent else _OCR_NOTICE_ENGINE
+                notices.append(template.format(n=n))
                 continue
             parts.append(ocr_result.text or "")
             label = ocr_result.engine
