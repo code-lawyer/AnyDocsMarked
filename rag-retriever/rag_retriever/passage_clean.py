@@ -11,8 +11,12 @@ import re
 # Images before links so `![alt](url)` is dropped whole, not reduced to its alt text.
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-_HTML_TAG = re.compile(r"<[^>]+>")
-_BARE_URL = re.compile(r"https?://\S+")
+# Name starts with an ASCII letter and the tag stays on one line. `<50,000.00…>`
+# is not a tag, and a later `>` must not swallow the text in between.
+_HTML_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9]*(?:[ \t/][ !-;=?-~]*)?>")
+# CJK and ideographic punctuation are not URL characters. `\S` would eat the
+# following sentence when there is no space after the URL.
+_BARE_URL = re.compile(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+")
 _HEADING_MARK = re.compile(r"^#{1,6} ", re.MULTILINE)
 _EMPHASIS = re.compile(r"\*\*|__")
 _FENCE = re.compile(r"^[ \t]*`{3,}[^\n]*$", re.MULTILINE)
