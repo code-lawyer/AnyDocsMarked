@@ -33,6 +33,15 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_query_expand() -> bool:
+    # case.json writes a boolean true as "local" (same writer as RAG_RERANK).
+    # Do not teach _env_bool that token: other flags must not start treating it as on.
+    raw = os.getenv("RAG_QUERY_EXPAND")
+    if raw is None or not raw.strip():
+        return False
+    return raw.strip().lower() in {"1", "true", "yes", "on", "local"}
+
+
 def _env_float(name: str, default: float) -> float:
     try:
         return float(os.getenv(name, str(default)))
@@ -120,6 +129,10 @@ class Config:
     parent_context: bool = False
     parent_tokens: int = 1600
 
+    # Second BM25 query when the first full-text list is shorter than k.
+    # Off unless RAG_QUERY_EXPAND is set, so existing results stay put.
+    query_expand: bool = False
+
     @classmethod
     def load(cls) -> "Config":
         backend = _env("RAG_EMBED_BACKEND", "local").lower()
@@ -174,4 +187,5 @@ class Config:
             min_score=min_score,
             parent_context=parent_context,
             parent_tokens=parent_tokens,
+            query_expand=_env_query_expand(),
         )

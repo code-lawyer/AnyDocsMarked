@@ -13,6 +13,7 @@ from .config import Config
 from .embed import get_embedder
 from .extract import extract_text, iter_files
 from .frontmatter import read_frontmatter, select_fields
+from .query_expand import keyword_variants
 from .rerank import get_reranker
 from .store import VectorStore
 
@@ -186,6 +187,14 @@ class Retriever:
             cand = max(k, self.cfg.hybrid_candidates)
             vector_hits = self._vector_search(qvec, cand, sp)
             text_hits = self.store.search_text(query, k=cand, source_prefix=sp)
+            if self.cfg.query_expand and len(text_hits) < k:
+                seen = {(h["source"], h["ord"]) for h in text_hits}
+                for variant in keyword_variants(query):
+                    for hit in self.store.search_text(variant, k=cand, source_prefix=sp):
+                        key = (hit["source"], hit["ord"])
+                        if key not in seen:
+                            text_hits.append(hit)
+                            seen.add(key)
             if text_hits:
                 fused = _rrf_fuse(vector_hits, text_hits, self.cfg.rrf_k, cand)
             else:

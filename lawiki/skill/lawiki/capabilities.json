@@ -299,6 +299,21 @@
     }
   },
   {
+    "id": "rag_query_expand",
+    "promise": "关键词命中少于请求条数时，用去掉功能词后的内容词再查一次 BM25，不调用模型",
+    "owner": "rag",
+    "tier": "CHOICE",
+    "phase": "answer",
+    "tradeoff": "只在第一次全文命中不足时追加候选；默认关，避免在没有查找金标准时改变召回",
+    "enforcement": "rag.py 读 case.json 注入 RAG_QUERY_EXPAND；rag Config 把 local/true 视为打开",
+    "sanctioned": {
+      "env": "RAG_QUERY_EXPAND",
+      "gui_control": "query_expand",
+      "default_on": false,
+      "answer_persist": true
+    }
+  },
+  {
     "id": "rag_min_score",
     "promise": "向量通道相关度下限，滤掉弱命中",
     "owner": "rag",
@@ -378,6 +393,7 @@
       "RAG_HYBRID_CANDIDATES",
       "RAG_METADATA_FIELDS",
       "RAG_PARENT_TOKENS",
+      "RAG_QUERY_EXPAND",
       "RAG_RERANK_MODEL",
       "RAG_RRF_K"
     ]

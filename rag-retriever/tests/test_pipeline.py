@@ -264,3 +264,131 @@ def test_search_min_score_with_parent_context_still_attaches(monkeypatch, tmp_pa
     hits = r.search("货款 违约金", k=3)
     assert hits
     assert hits[0]["parent_text"]
+
+
+def test_search_query_expand_appends_variant_only_when_thin(monkeypatch, tmp_path):
+    # First full-text search of the original query is empty. The first keyword
+    # variant returns one hit. Expansion is BM25-only: the vector query is not
+    # rewritten, and the variant helper is not called when the flag is off.
+    from rag_retriever.query_expand import keyword_variants
+
+    query = "合同 的 违约金 是 多少"
+    variants = keyword_variants(query)
+    assert variants
+    first_variant = variants[0]
+    variant_hit = {
+        "source": "d.md",
+        "ord": 3,
+        "text": "违约金二十万",
+        "score": 4.2,
+        "metadata": {"quality": "clean"},
+    }
+    fixed = [0.25, 0.5, 0.75]
+
+    class _FixedEmbedder:
+        def embed_query(self, text):
+            return list(fixed)
+
+    class _S:
+        def __init__(self):
+            self.vectors = []
+            self.texts = []
+
+        def search(self, vec, k, source_prefix=None):
+            self.vectors.append(vec)
+            return []
+
+        def search_text(self, q, k, source_prefix=None):
+            self.texts.append((q, source_prefix))
+            if q == query:
+                return []
+            if q == first_variant:
+                return [dict(variant_hit)]
+            return []
+
+    def _search(expand):
+        cfg = Config.load()
+        cfg = type(cfg)(**{
+            **cfg.__dict__,
+            "data_dir": tmp_path,
+            "hybrid": True,
+            "rerank": "none",
+            "parent_context": False,
+            "query_expand": expand,
+        })
+        r = pipeline_mod.Retriever(cfg)
+        r._embedder = _FixedEmbedder()
+        store = _S()
+        r.store = store
+        return r.search(query, k=5, source_prefix="case/"), store
+
+    hits, store = _search(True)
+    assert store.vectors == [fixed]
+    assert store.texts[0] == (query, "case/")
+    assert (first_variant, "case/") in store.texts
+    assert any(
+        h["source"] == variant_hit["source"]
+        and h["ord"] == variant_hit["ord"]
+        and h["text"] == variant_hit["text"]
+        and h["metadata"] == variant_hit["metadata"]
+        for h in hits
+    )
+
+    called = []
+
+    def _variants(q):
+        called.append(q)
+        return ["should-not-be-searched"]
+
+    monkeypatch.setattr(pipeline_mod, "keyword_variants", _variants)
+    monkeypatch.setattr("rag_retriever.query_expand.keyword_variants", _variants)
+    hits_off, store_off = _search(False)
+    assert called == []
+    assert store_off.texts == [(query, "case/")]
+    assert hits_off == []
+
+
+def test_search_query_expand_skips_when_not_hybrid_or_already_full(monkeypatch, tmp_path):
+    called = []
+    monkeypatch.setattr(pipeline_mod, "keyword_variants", lambda q: called.append(q) or ["v"])
+
+    class _E:
+        def embed_query(self, text):
+            return [1.0, 0.0, 0.0]
+
+    class _S:
+        def __init__(self, n):
+            self.n = n
+
+        def search(self, vec, k, source_prefix=None):
+            return [{"source": "d", "ord": 0, "text": "vec", "score": 0.9, "metadata": {}}]
+
+        def search_text(self, q, k, source_prefix=None):
+            return [
+                {"source": "d", "ord": i, "text": f"h{i}", "score": 1.0, "metadata": {}}
+                for i in range(self.n)
+            ]
+
+    def _run(hybrid, n, k):
+        called.clear()
+        cfg = Config.load()
+        cfg = type(cfg)(**{
+            **cfg.__dict__,
+            "data_dir": tmp_path,
+            "hybrid": hybrid,
+            "rerank": "none",
+            "parent_context": False,
+            "query_expand": True,
+        })
+        r = pipeline_mod.Retriever(cfg)
+        r._embedder = _E()
+        r.store = _S(n)
+        return r.search("合同 的 违约金", k=k)
+
+    hits = _run(hybrid=False, n=0, k=3)
+    assert [h["text"] for h in hits] == ["vec"]
+    assert called == []
+
+    hits = _run(hybrid=True, n=3, k=3)
+    assert len(hits) == 3
+    assert called == []
