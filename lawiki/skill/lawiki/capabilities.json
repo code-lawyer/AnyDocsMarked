@@ -393,7 +393,6 @@
       "RAG_HYBRID_CANDIDATES",
       "RAG_METADATA_FIELDS",
       "RAG_PARENT_TOKENS",
-      "RAG_QUERY_EXPAND",
       "RAG_RERANK_MODEL",
       "RAG_RRF_K"
     ]
