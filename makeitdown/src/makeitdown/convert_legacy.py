@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .convert_anydoc import convert as convert_anydoc
 from .convert_native import convert as convert_native
+from .magic import sniff_container
 from .models import ConversionResult, ConversionUnavailable, LegacyConversionUnavailable
 
 # A single Word/WPS COM operation can take seconds; cap it so one hung document
@@ -34,20 +35,6 @@ _HINT = (
     "legacy .doc/.wps needs Microsoft Word or WPS Office installed (Windows), "
     "or LibreOffice on PATH; none found — skipped."
 )
-
-_OOXML_MAGIC = b"PK\x03\x04"
-_OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
-
-
-def _sniff(path: Path) -> str:
-    """Return 'ooxml', 'ole2', or 'unknown' from the file's magic bytes."""
-    with open(path, "rb") as fh:
-        head = fh.read(8)
-    if head.startswith(_OOXML_MAGIC):
-        return "ooxml"
-    if head.startswith(_OLE2_MAGIC):
-        return "ole2"
-    return "unknown"
 
 
 def _default_dispatch():
@@ -205,7 +192,7 @@ def convert(path: Path) -> ConversionResult:
     # Resolve to absolute: Word COM and LibreOffice resolve relative paths against
     # their own working directory, not ours, so a relative path would not be found.
     src = Path(path).resolve()
-    kind = _sniff(src)
+    kind = sniff_container(src)
     with tempfile.TemporaryDirectory() as td:
         td_path = Path(td)
         if kind == "ooxml":
