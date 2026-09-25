@@ -293,7 +293,8 @@ def convert_tree(
                 result.text, n_omitted = _mark_images(result.text)
                 result.assets = {}
             cc_reasons = result.cross_check_reasons or []
-            reasons = struct_reasons + cc_reasons + _quality_reasons(result, source_type)
+            notice_reasons = result.notices or []
+            reasons = notice_reasons + struct_reasons + cc_reasons + _quality_reasons(result, source_type)
             if _sha256_file(src) != source_hash_before:
                 raise RuntimeError("source changed during conversion; retry this file")
             _write_output(out_md, result, source_hash_before, rel.as_posix(), source_type,
