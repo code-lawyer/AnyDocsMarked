@@ -52,6 +52,8 @@ def read_pdf(path: Path, *, dispatcher, cloud_consent: bool) -> ConversionResult
 
     parts: list[str] = []
     notices: list[str] = []
+    confidences: list[float] = []
+    cross_check_reasons: list[str] = []
     first_ocr_engine: str | None = None
     other_engines: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="makeitdown-pdf-") as tmp:
@@ -71,6 +73,10 @@ def read_pdf(path: Path, *, dispatcher, cloud_consent: bool) -> ConversionResult
                 notices.append(template.format(n=n))
                 continue
             parts.append(ocr_result.text or "")
+            if ocr_result.confidences:
+                confidences.extend(ocr_result.confidences)
+            if ocr_result.cross_check_reasons:
+                cross_check_reasons.extend(ocr_result.cross_check_reasons)
             label = ocr_result.engine
             if first_ocr_engine is None:
                 first_ocr_engine = label
@@ -88,4 +94,6 @@ def read_pdf(path: Path, *, dispatcher, cloud_consent: bool) -> ConversionResult
         pages=len(parts),
         page_map="native",
         notices=notices or None,
+        confidences=confidences or None,
+        cross_check_reasons=cross_check_reasons or None,
     )

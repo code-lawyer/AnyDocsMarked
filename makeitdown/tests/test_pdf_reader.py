@@ -243,6 +243,60 @@ def test_later_ocr_engine_label_is_noted_but_not_used(monkeypatch, tmp_path):
     assert result.text.index("<!-- page: 3 -->") < result.text.rindex("扫描正文")
 
 
+def test_ocr_scores_and_cross_check_reasons_follow_page_order(monkeypatch, tmp_path):
+    _patch_extract(
+        monkeypatch,
+        [
+            _page(0, "Article 3 50,000.00", False),
+            _page(1, "", True),
+            _page(2, "", True),
+            _page(3, "", True),
+        ],
+    )
+    _patch_render(monkeypatch)
+    results = iter([
+        ConversionResult(
+            text="扫描一",
+            engine="local:pp-structurev3",
+            pages=1,
+            confidences=[0.99, 0.4],
+            cross_check_reasons=["digit mismatch"],
+            assets={"imgs/a.png": b"PNGBYTES"},
+        ),
+        ConversionResult(
+            text="扫描二",
+            engine="local:pp-structurev3",
+            pages=1,
+            confidences=None,
+            cross_check_reasons=[],
+        ),
+        ConversionResult(
+            text="扫描三",
+            engine="local:pp-structurev3",
+            pages=1,
+            confidences=[0.2],
+            cross_check_reasons=["digit mismatch"],
+        ),
+    ])
+
+    class Disp:
+        def convert(self, path):
+            return next(results)
+
+    result = read_pdf(tmp_path / "a.pdf", dispatcher=Disp(), cloud_consent=False)
+    assert result is not None
+    assert result.confidences == [0.99, 0.4, 0.2]
+    assert result.cross_check_reasons == ["digit mismatch", "digit mismatch"]
+    assert result.assets == {}
+    assert "0.99" not in result.text
+    assert "0.4" not in result.text
+    assert "digit mismatch" not in result.text
+    assert result.notices is None or all(
+        "digit mismatch" not in notice and "0.99" not in notice
+        for notice in result.notices
+    )
+
+
 def test_render_page_writes_png(tmp_path):
     import fitz
 
