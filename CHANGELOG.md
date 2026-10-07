@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### Added
+
+- **默认 PDF 仍是 MarkItDown**:平均字数路由和 `align_page_markers` 不变。
+- **可选逐页 PDF 读取(默认关)**:`--pdf-reader-inspector` 需要 `pip install "makeitdown[pdf]"`。成功时按页写 `<!-- page: N -->`。未安装或抛错则退回原路径，转换不失败。
+- **OLE 头的 `.docx` 走 legacy**:名叫 `.docx` 但文件头是 OLE 的文件走 legacy。
+- **本地 rerank 打分前清洗**:打分前去掉 Markdown 标记，返回文本仍是分块原文。
+- **`RAG_QUERY_EXPAND`(默认关)**:打开后只在全文命中少于 `k` 时追加内容词查询。`local` 算打开。
+
 ## 2.0.0 - 2026-08-21
 
 > **破坏性变更（主版本）**：移除 rag-retriever 的云端 embedding 后端（`openai` /
