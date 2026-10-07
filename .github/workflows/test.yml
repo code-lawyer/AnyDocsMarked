@@ -41,7 +41,7 @@ jobs:
       # Pinned to 3.12 for a reproducible CI matrix (makeitdown itself only
       # requires >=3.11, no upper bound). The `dev` extra pulls pytest;
       # `local` (paddle) is intentionally omitted — OCR tests mock it.
-      - run: uv run --python 3.12 --extra dev --with pytest-cov python -m pytest tests -q ${{ matrix.os == 'ubuntu-latest' && '--cov=makeitdown --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=80' || '' }}
+      - run: uv run --python 3.12 --extra dev --extra pdf --with pytest-cov python -m pytest tests -q ${{ matrix.os == 'ubuntu-latest' && '--cov=makeitdown --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=80' || '' }}
         working-directory: makeitdown
 
   rag-retriever:
