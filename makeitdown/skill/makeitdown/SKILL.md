@@ -128,7 +128,8 @@ token comes from env `PADDLEOCR_AISTUDIO_TOKEN` (or `--cloud-token`).
   serialized internally for thread-safety, so this mainly speeds up native files).
 - `--text-threshold N` — avg chars/page below which a PDF is treated as scanned.
 - `--pdf-reader-inspector` — off by default. The default PDF path is still
-  MarkItDown; average-character routing and `align_page_markers` are unchanged.
+  MarkItDown, chosen by the average-characters route; this flag does not change
+  that default.
   Needs `pip install "makeitdown[pdf]"`. On success, writes `<!-- page: N -->`
   per page. If the extra is not installed or the reader raises, conversion falls
   back to the original path and does not fail.
