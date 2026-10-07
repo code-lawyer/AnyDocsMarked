@@ -7,7 +7,7 @@
 ### Added
 
 - **默认 PDF 仍是 MarkItDown**:由平均字数路由选择。`--pdf-reader-inspector` 默认关，不改变这条默认路径。
-- **可选逐页 PDF 读取(默认关)**:`--pdf-reader-inspector` 需要 `pip install "makeitdown[pdf]"`。成功时按页写 `<!-- page: N -->`。未安装或抛错则退回原路径，转换不失败。
+- **可选逐页 PDF 读取(默认关)**:`--pdf-reader-inspector` 需要 `pip install "makeitdown[pdf]"`。成功时按页写 `<!-- page: N -->`。未安装或提取出错则退回原路径并记 warning，文件不因此失败。某一页无法 OCR 时该页正文为空并记 warning，可信页保留。其他崩溃仍可使该文件失败。
 - **OLE 头的 `.docx` 走 legacy**:名叫 `.docx` 但文件头是 OLE 的文件走 legacy。
 - **本地 rerank 打分前清洗**:打分前去掉 Markdown 标记，返回文本仍是分块原文。
 - **`RAG_QUERY_EXPAND`(默认关)**:打开后只在全文命中少于 `k` 时追加内容词查询。`local` 算打开。

@@ -131,8 +131,9 @@ token comes from env `PADDLEOCR_AISTUDIO_TOKEN` (or `--cloud-token`).
   MarkItDown, chosen by the average-characters route; this flag does not change
   that default.
   Needs `pip install "makeitdown[pdf]"`. On success, writes `<!-- page: N -->`
-  per page. If the extra is not installed or the reader raises, conversion falls
-  back to the original path and does not fail.
+  per page. A missing extra or an extract error falls back to the original path
+  and warns; that file is not failed. A page that cannot be OCR'd is left empty
+  and warned, and trusted pages are kept. Other crashes can fail that file.
 - `--keep-images` — extract image files from scans and keep standard `![]()`
   references (default: text-only, but each image now leaves a `〔图像：文件名〕`
   placeholder marker recording that an image existed at that spot — never

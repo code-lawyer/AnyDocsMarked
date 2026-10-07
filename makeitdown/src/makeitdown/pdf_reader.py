@@ -1,8 +1,13 @@
-"""Optional per-page PDF reader. A missing inspector or a full scan returns None."""
+"""Optional per-page PDF reader.
+
+No trusted page returns None so the caller keeps today's whole-file path.
+A missing inspector or an extract error raises PdfInspectorUnavailable.
+"""
 
 import tempfile
 from pathlib import Path
 
+from .cloud_consent import CloudConsentRequired
 from .models import ConversionResult, ConversionUnavailable, OCRUnavailableError
 from .pages import join_pages
 
@@ -10,14 +15,26 @@ _OCR_NOTICE_NO_CONSENT = (
     "pdf page {n} needs OCR; local engine unavailable and cloud consent is off"
 )
 _OCR_NOTICE_ENGINE = "pdf page {n} needs OCR; OCR engine unavailable"
+INSPECTOR_FALLBACK_WARNING = "pdf-inspector unavailable; used the default PDF path"
+
+
+class PdfInspectorUnavailable(RuntimeError):
+    """pdf-inspector could not be imported, or extract_pages_markdown failed."""
 
 
 def _extract_pages(path: Path):
-    """Per-page markdown from pdf-inspector. Import and extract errors propagate."""
-    import pdf_inspector
+    """Per-page markdown from pdf-inspector.
 
-    extracted = pdf_inspector.extract_pages_markdown(str(path))
-    return extracted.pages
+    ImportError and extract_pages_markdown errors raise PdfInspectorUnavailable.
+    Render and OCR are not done here, so their crashes stay outside this catch.
+    """
+    try:
+        import pdf_inspector
+
+        extracted = pdf_inspector.extract_pages_markdown(str(path))
+        return list(extracted.pages)
+    except Exception as exc:
+        raise PdfInspectorUnavailable("pdf-inspector unavailable") from exc
 
 
 def _render_page(pdf, page_index, dest) -> None:
@@ -37,16 +54,15 @@ def _has_trusted_text(page) -> bool:
 def read_pdf(path: Path, *, dispatcher, cloud_consent: bool) -> ConversionResult | None:
     """Read one PDF page at a time, or None to keep today's whole-file path.
 
-    None means pdf-inspector is missing, extraction raised, or every page needs
-    OCR (or its markdown is empty after stripping). This function does not
+    None means there is no trusted page: every page needs OCR, or its markdown
+    is empty after stripping. That case is a silent fallback. A missing
+    pdf-inspector or an extract_pages_markdown error raises
+    PdfInspectorUnavailable instead of returning None. This function does not
     upload. An unavailable OCR page says consent is off only when
     ``cloud_consent`` is false.
     """
     path = Path(path)
-    try:
-        pages = list(_extract_pages(path))
-    except Exception:
-        return None
+    pages = list(_extract_pages(path))
     if not pages or not any(_has_trusted_text(page) for page in pages):
         return None
 
@@ -67,7 +83,7 @@ def read_pdf(path: Path, *, dispatcher, cloud_consent: bool) -> ConversionResult
             _render_page(path, page.page, dest)
             try:
                 ocr_result = dispatcher.convert(dest)
-            except (OCRUnavailableError, ConversionUnavailable):
+            except (OCRUnavailableError, ConversionUnavailable, CloudConsentRequired):
                 parts.append("")
                 template = _OCR_NOTICE_NO_CONSENT if not cloud_consent else _OCR_NOTICE_ENGINE
                 notices.append(template.format(n=n))

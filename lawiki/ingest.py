@@ -279,7 +279,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--structure-headings", action="store_true",
                    help="用 LLM 重建标题层级（需 MAKEITDOWN_LLM_* 环境变量 + consent）")
     p.add_argument("--pdf-reader-inspector", action="store_true",
-                   help="PDF 按页读取文字层（透传给 makeitdown；未安装 extra 或失败则退回原路径）")
+                   help="PDF 按页读取文字层（透传给 makeitdown；未安装 extra 或提取失败则退回并警告）")
     p.add_argument("--rag-parent-context", action="store_true",
                    help="small-to-big：索引期返回父块上下文（设 RAG_PARENT_CONTEXT）")
     return p

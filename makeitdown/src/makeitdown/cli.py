@@ -36,7 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="avg chars/page below which a PDF is treated as scanned")
     p.add_argument("--pdf-reader-inspector", action="store_true",
                    help="read PDFs page by page via the optional pdf-inspector extra "
-                        "(default off; missing extra or failure keeps the whole-file path)")
+                        "(default off; a missing extra or extract error falls back and warns)")
     p.add_argument("--report", default=None, help="path to report.json")
     p.add_argument("--strict", action="store_true",
                    help="exit non-zero if any file failed (for scripts/CI; "

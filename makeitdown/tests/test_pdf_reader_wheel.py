@@ -1,9 +1,20 @@
+import importlib.metadata
+
 import fitz
 import pytest
 
 from makeitdown.pdf_reader import read_pdf
 
-pytest.importorskip("pdf_inspector")
+
+def _require_pdf_inspector_wheel():
+    """Skip only when the distribution is absent. A broken installed wheel fails."""
+    try:
+        importlib.metadata.distribution("pdf-inspector")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip("pdf-inspector is not installed")
+    import pdf_inspector
+
+    assert hasattr(pdf_inspector, "extract_pages_markdown")
 
 
 def _two_page_pdf(path):
@@ -21,6 +32,7 @@ class _ForbiddenDispatcher:
 
 
 def test_real_wheel_keeps_amount_date_and_page_markers(tmp_path):
+    _require_pdf_inspector_wheel()
     path = tmp_path / "two-page.pdf"
     _two_page_pdf(path)
     result = read_pdf(path, dispatcher=_ForbiddenDispatcher(), cloud_consent=False)

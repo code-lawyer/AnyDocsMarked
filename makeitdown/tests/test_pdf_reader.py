@@ -1,10 +1,16 @@
+import builtins
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import makeitdown.pdf_reader as pdf_reader
 import makeitdown.pipeline as pl
+from makeitdown.cloud_consent import CloudConsentRequired
 from makeitdown.models import ConversionResult, ConversionUnavailable, OCRUnavailableError
-from makeitdown.pdf_reader import read_pdf
+from makeitdown.pdf_reader import PdfInspectorUnavailable, read_pdf
 
 
 def _page(index, markdown, needs_ocr):
@@ -24,13 +30,37 @@ def _patch_render(monkeypatch, rendered=None):
     monkeypatch.setattr(pdf_reader, "_render_page", render)
 
 
-def test_extract_runtime_error_returns_none(monkeypatch, tmp_path):
-    def extract(path):
-        raise RuntimeError("boom")
+def _fake_inspector(monkeypatch, *, pages=None, error=None):
+    fake = types.ModuleType("pdf_inspector")
 
-    monkeypatch.setattr(pdf_reader, "_extract_pages", extract)
-    result = read_pdf(tmp_path / "a.pdf", dispatcher=object(), cloud_consent=False)
-    assert result is None
+    def extract_pages_markdown(path):
+        if error is not None:
+            raise error
+        return SimpleNamespace(pages=pages)
+
+    fake.extract_pages_markdown = extract_pages_markdown
+    monkeypatch.setitem(sys.modules, "pdf_inspector", fake)
+
+
+def test_extract_runtime_error_raises_unavailable(monkeypatch, tmp_path):
+    _fake_inspector(monkeypatch, error=RuntimeError("boom"))
+    with pytest.raises(PdfInspectorUnavailable):
+        read_pdf(tmp_path / "a.pdf", dispatcher=object(), cloud_consent=False)
+
+
+def test_missing_inspector_import_raises_unavailable(monkeypatch, tmp_path):
+    monkeypatch.delitem(sys.modules, "pdf_inspector", raising=False)
+    real_import = builtins.__import__
+
+    def guarded(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "pdf_inspector":
+            raise ImportError("no pdf_inspector")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded)
+    with pytest.raises(PdfInspectorUnavailable) as exc:
+        read_pdf(tmp_path / "a.pdf", dispatcher=object(), cloud_consent=False)
+    assert isinstance(exc.value.__cause__, ImportError)
 
 
 def test_all_pages_need_ocr_returns_none_without_dispatcher(monkeypatch, tmp_path):
@@ -134,6 +164,63 @@ def test_ocr_unavailable_with_consent_does_not_claim_consent_is_off(monkeypatch,
     assert "consent is off" not in joined
     assert result.notices == ["pdf page 2 needs OCR; OCR engine unavailable"]
     assert "consent is off" not in result.text
+
+
+def test_cloud_consent_required_blanks_page_and_keeps_amount(monkeypatch, tmp_path):
+    _patch_extract(
+        monkeypatch,
+        [
+            _page(0, "Article 3 50,000.00", False),
+            _page(1, "", True),
+        ],
+    )
+    _patch_render(monkeypatch)
+
+    class Disp:
+        def convert(self, path):
+            raise CloudConsentRequired("withheld")
+
+    result = read_pdf(tmp_path / "a.pdf", dispatcher=Disp(), cloud_consent=False)
+    assert result is not None
+    assert result.text == (
+        "<!-- page: 1 -->\nArticle 3 50,000.00\n<!-- page: 2 -->\n"
+    )
+    assert "50,000.00" in result.text
+    assert "consent is off" not in result.text
+    assert "needs OCR" not in result.text
+    assert result.notices == [
+        "pdf page 2 needs OCR; local engine unavailable and cloud consent is off"
+    ]
+
+
+def test_cloud_consent_required_with_consent_does_not_claim_consent_is_off(
+    monkeypatch, tmp_path,
+):
+    _patch_extract(monkeypatch, [_page(0, "kept", False), _page(1, "", True)])
+    _patch_render(monkeypatch)
+
+    class Disp:
+        def convert(self, path):
+            raise CloudConsentRequired("withheld")
+
+    result = read_pdf(tmp_path / "a.pdf", dispatcher=Disp(), cloud_consent=True)
+    assert result is not None
+    assert result.text == "<!-- page: 1 -->\nkept\n<!-- page: 2 -->\n"
+    assert "consent is off" not in result.text
+    assert result.notices == ["pdf page 2 needs OCR; OCR engine unavailable"]
+    assert "consent is off" not in "\n".join(result.notices)
+
+
+def test_unrelated_ocr_error_still_propagates(monkeypatch, tmp_path):
+    _patch_extract(monkeypatch, [_page(0, "kept", False), _page(1, "", True)])
+    _patch_render(monkeypatch)
+
+    class Disp:
+        def convert(self, path):
+            raise RuntimeError("ocr crash")
+
+    with pytest.raises(RuntimeError, match="ocr crash"):
+        read_pdf(tmp_path / "a.pdf", dispatcher=Disp(), cloud_consent=False)
 
 
 def test_conversion_unavailable_uses_the_same_blank_page_notice(monkeypatch, tmp_path):

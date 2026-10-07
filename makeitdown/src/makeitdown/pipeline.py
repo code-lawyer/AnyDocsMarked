@@ -16,7 +16,7 @@ from .convert_native import convert as convert_native
 from .convert_ocr import OCRDispatcher
 from .frontmatter import build_frontmatter, prepend_frontmatter
 from .models import ConversionUnavailable
-from .pdf_reader import read_pdf
+from .pdf_reader import INSPECTOR_FALLBACK_WARNING, PdfInspectorUnavailable, read_pdf
 from .quality import QualityThresholds, assess
 from .router import IGNORED_FILENAMES, classify
 
@@ -270,9 +270,14 @@ def convert_tree(
             struct_reasons: list[str] = []
             structured_ok = False
             inspected = None
+            inspector_fallback = None
             if pdf_reader_inspector and src.suffix.lower() == ".pdf":
-                inspected = read_pdf(
-                    src, dispatcher=dispatcher, cloud_consent=cloud_consent)
+                try:
+                    inspected = read_pdf(
+                        src, dispatcher=dispatcher, cloud_consent=cloud_consent)
+                except PdfInspectorUnavailable:
+                    # No trusted-page None stays silent. This is import/extract only.
+                    inspector_fallback = INSPECTOR_FALLBACK_WARNING
             if inspected is not None:
                 result = inspected
             elif route == "native":
@@ -303,6 +308,8 @@ def convert_tree(
             cc_reasons = result.cross_check_reasons or []
             notice_reasons = result.notices or []
             reasons = notice_reasons + struct_reasons + cc_reasons + _quality_reasons(result, source_type)
+            if inspector_fallback:
+                reasons.append(inspector_fallback)
             if _sha256_file(src) != source_hash_before:
                 raise RuntimeError("source changed during conversion; retry this file")
             _write_output(out_md, result, source_hash_before, rel.as_posix(), source_type,
