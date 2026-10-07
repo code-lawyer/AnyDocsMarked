@@ -1372,6 +1372,9 @@ local = [
     { name = "paddleocr", extra = ["doc-parser"] },
     { name = "paddlepaddle" },
 ]
+pdf = [
+    { name = "pdf-inspector" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1379,13 +1382,14 @@ requires-dist = [
     { name = "markitdown", extras = ["all"] },
     { name = "paddleocr", extras = ["doc-parser"], marker = "extra == 'local'" },
     { name = "paddlepaddle", marker = "extra == 'local'" },
+    { name = "pdf-inspector", marker = "extra == 'pdf'", specifier = "==1.24.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pymupdf" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pywin32", marker = "sys_platform == 'win32' and extra == 'com'" },
     { name = "requests" },
 ]
-provides-extras = ["local", "com", "dev"]
+provides-extras = ["local", "pdf", "com", "dev"]
 
 [[package]]
 name = "mammoth"
@@ -2100,6 +2104,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/31/89/8fc1c268969fac43688d65fd92e67df24bd128d53cb4d2eee534cd307399/pandas-3.0.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:9c39be2d709d01fa972a0cabc522389fceca4f3969332ba25a7d6c5802cf976a", size = 11828897, upload-time = "2026-05-11T18:54:17.146Z" },
     { url = "https://files.pythonhosted.org/packages/56/3b/e7d20dea247a3e6dc0bd8a6953854afbedc03951def4e7371e05e7263e25/pandas-3.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:4db8c527972a821cf5286b40ccc57642a39bc62e62022b42f99f8a67fca8c3a1", size = 10900855, upload-time = "2026-05-11T18:54:19.72Z" },
     { url = "https://files.pythonhosted.org/packages/0f/54/68a0978d1ef8502b8492099beaa6e7a0c1b32e3b5d4f677f5810cb08711c/pandas-3.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:b2c95f8bfc1ee412bf482605d7bfd30c12d1d26bd59fdd91efeef1d4718decb1", size = 9466464, upload-time = "2026-05-11T18:54:22.754Z" },
+]
+
+[[package]]
+name = "pdf-inspector"
+version = "1.24.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/fe/7297d862548567a600f17f80eca97239149a43e6ebb317632ecbac09c72d/pdf_inspector-1.24.0.tar.gz", hash = "sha256:976d2cbb54228d34daae5c82adb960e0eae8c1d4f885a4b9924cb06aca8e7da5", size = 2105521, upload-time = "2026-09-23T04:39:20.119Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/ac/a7a1ff48898f66324f47c6609d83dd14dd764ecdf98c9ea2cb25c6a123cd/pdf_inspector-1.24.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:a93cb38057841e75ae6037aeb55954fb4dfd3c5968dddfe8d6317c404736d93a", size = 6336966, upload-time = "2026-09-23T04:39:08.091Z" },
+    { url = "https://files.pythonhosted.org/packages/46/4e/8881e2bac09121818aa25cdbaa2aaf01a2ec83df1ce16e72cbc3564f0957/pdf_inspector-1.24.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:e236c5dcca5d370fe4d8ec060bb7768353d31276499cb5376d0465c2d96be40c", size = 6040698, upload-time = "2026-09-23T04:39:10.512Z" },
+    { url = "https://files.pythonhosted.org/packages/07/15/a84a17b9424579017c24bc4a7e66b4f1fffe1b1df0f80bb2468dd5099f45/pdf_inspector-1.24.0-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:042da19427583edf0ddc51f9df2dc03897a0e3f5374c1346c7357ac46ce34be4", size = 6611433, upload-time = "2026-09-23T04:39:12.403Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/c5/2c4b0e16ed03ee4048b96a963807f23415f93ce99c79210ad91ebdd94c01/pdf_inspector-1.24.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:afc1dc63f3d4cd0d06d80dedeac6d20afc60657ad563555c23302d22529c6bce", size = 6874970, upload-time = "2026-09-23T04:39:14.582Z" },
+    { url = "https://files.pythonhosted.org/packages/96/6c/9e824bb0fb4271c89a21df163fe6893a2b996730c71321b33259925fd84b/pdf_inspector-1.24.0-cp38-abi3-win_amd64.whl", hash = "sha256:79b2357038482563d76405cb61e48f4288ad3873ee93b6b4e40a04e0c43aade1", size = 6169624, upload-time = "2026-09-23T04:39:17.584Z" },
 ]
 
 [[package]]

@@ -199,6 +199,20 @@
     ]
   },
   {
+    "id": "pdf_reader_inspector",
+    "promise": "显式打开时，PDF 按页读取文字层；不可信页走现有 OCR；未安装或失败则退回 MarkItDown",
+    "owner": "makeitdown",
+    "tier": "CHOICE",
+    "phase": "ingest",
+    "tradeoff": "阅读顺序和页边界更好，但正文与 MarkItDown 不再逐字节相同。默认关。",
+    "enforcement": "ingest 仅在勾选时向 makeitdown 传递 --pdf-reader-inspector；makeitdown 未安装 extra 或抛错时退回原路径。默认路径不变；显式 --pdf-reader-inspector 且读取成功时，正文来自逐页提取，页标记由 join_pages 写出。",
+    "sanctioned": {
+      "ingest_flag": "--pdf-reader-inspector",
+      "gui_control": "pdf_reader_inspector",
+      "default_on": false
+    }
+  },
+  {
     "id": "rag_parent_context",
     "promise": "small-to-big 检索：索引细粒度子块、返回父块上下文",
     "owner": "rag",

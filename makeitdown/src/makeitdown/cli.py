@@ -34,6 +34,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         "(mtime-based; drop the flag to force a full re-convert)")
     p.add_argument("--text-threshold", type=int, default=50,
                    help="avg chars/page below which a PDF is treated as scanned")
+    p.add_argument("--pdf-reader-inspector", action="store_true",
+                   help="read PDFs page by page via the optional pdf-inspector extra "
+                        "(default off; missing extra or failure keeps the whole-file path)")
     p.add_argument("--report", default=None, help="path to report.json")
     p.add_argument("--strict", action="store_true",
                    help="exit non-zero if any file failed (for scripts/CI; "
@@ -194,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         cross_check_mode=args.cross_check_mode,
         cloud_consent=args.cloud_consent,
         mineru_token=mineru_token,
+        pdf_reader_inspector=args.pdf_reader_inspector,
     )
 
     structured = (f"structured={report.get('structured', 0)} "

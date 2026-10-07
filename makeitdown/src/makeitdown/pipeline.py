@@ -16,6 +16,7 @@ from .convert_native import convert as convert_native
 from .convert_ocr import OCRDispatcher
 from .frontmatter import build_frontmatter, prepend_frontmatter
 from .models import ConversionUnavailable
+from .pdf_reader import read_pdf
 from .quality import QualityThresholds, assess
 from .router import IGNORED_FILENAMES, classify
 
@@ -190,6 +191,7 @@ def convert_tree(
     cloud_consent: bool = False,
     mineru_token: str | None = None,
     progress: bool = True,
+    pdf_reader_inspector: bool = False,
 ) -> dict:
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -267,7 +269,13 @@ def convert_tree(
             source_type = src.suffix.lstrip(".")
             struct_reasons: list[str] = []
             structured_ok = False
-            if route == "native":
+            inspected = None
+            if pdf_reader_inspector and src.suffix.lower() == ".pdf":
+                inspected = read_pdf(
+                    src, dispatcher=dispatcher, cloud_consent=cloud_consent)
+            if inspected is not None:
+                result = inspected
+            elif route == "native":
                 result = convert_native(src)
             elif route == "legacy":
                 result = convert_legacy(src)

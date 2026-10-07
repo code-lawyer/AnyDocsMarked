@@ -20,6 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 local = ["paddleocr[doc-parser]", "paddlepaddle"]
+# Per-page PDF text. Not a default dependency; the reader imports it only when asked.
+pdf = ["pdf-inspector==1.24.0"]
 # Legacy .doc/.wps conversion via an already-installed Word/WPS on Windows.
 # Installs nothing but the COM bridge; it drives an app the user already has.
 com = ["pywin32 ; platform_system=='Windows'"]
