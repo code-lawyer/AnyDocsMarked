@@ -6,4 +6,4 @@ questions itself; `search()` returns the relevant passages and the agent
 reasons over them.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"

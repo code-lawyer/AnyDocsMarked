@@ -127,6 +127,13 @@ token comes from env `PADDLEOCR_AISTUDIO_TOKEN` (or `--cloud-token`).
 - `--workers N` — concurrency (native conversions run in parallel; local OCR is
   serialized internally for thread-safety, so this mainly speeds up native files).
 - `--text-threshold N` — avg chars/page below which a PDF is treated as scanned.
+- `--pdf-reader-inspector` — off by default. The default PDF path is still
+  MarkItDown, chosen by the average-characters route; this flag does not change
+  that default.
+  Needs `pip install "makeitdown[pdf]"`. On success, writes `<!-- page: N -->`
+  per page. A missing extra or an extract error falls back to the original path
+  and warns; that file is not failed. A page that cannot be OCR'd is left empty
+  and warned, and trusted pages are kept. Other crashes can fail that file.
 - `--keep-images` — extract image files from scans and keep standard `![]()`
   references (default: text-only, but each image now leaves a `〔图像：文件名〕`
   placeholder marker recording that an image existed at that spot — never
@@ -222,8 +229,9 @@ The installed package ships the CLI; this folder ships the agent instructions.
 
 makeitdown handles old `.doc` and `.wps` by first sniffing the real container:
 a file that is actually OOXML (a renamed `.docx`) is converted with zero extra
-tooling. Only genuine legacy binaries need an external converter, and here you
-MUST be transparent with the user:
+tooling. A file named `.docx` whose header is OLE goes to legacy. Only genuine
+legacy binaries need an external converter, and here you MUST be transparent
+with the user:
 
 - **Never silently install anything.** Conversion of true `.doc`/`.wps` binaries
   uses, in order: (1) an **already-installed** Microsoft Word or Kingsoft WPS on

@@ -199,6 +199,20 @@
     ]
   },
   {
+    "id": "pdf_reader_inspector",
+    "promise": "显式打开时，PDF 按页读取文字层；不可信页走现有 OCR；未安装或提取失败则退回原路径并警告。某一页无法 OCR 时该页为空并警告，其他崩溃可使该文件失败",
+    "owner": "makeitdown",
+    "tier": "CHOICE",
+    "phase": "ingest",
+    "tradeoff": "阅读顺序和页边界更好，但正文与 MarkItDown 不再逐字节相同。默认关。",
+    "enforcement": "ingest 仅在勾选时向 makeitdown 传递 --pdf-reader-inspector；makeitdown 未安装 extra 或提取失败时退回原路径并警告。某一页无法 OCR 时该页为空并警告，其他崩溃可使该文件失败。默认路径不变；显式 --pdf-reader-inspector 且读取成功时，正文来自逐页提取，页标记由 join_pages 写出。",
+    "sanctioned": {
+      "ingest_flag": "--pdf-reader-inspector",
+      "gui_control": "pdf_reader_inspector",
+      "default_on": false
+    }
+  },
+  {
     "id": "rag_parent_context",
     "promise": "small-to-big 检索：索引细粒度子块、返回父块上下文",
     "owner": "rag",
@@ -294,6 +308,21 @@
     "sanctioned": {
       "env": "RAG_RERANK",
       "gui_control": "rerank",
+      "default_on": false,
+      "answer_persist": true
+    }
+  },
+  {
+    "id": "rag_query_expand",
+    "promise": "关键词命中少于请求条数时，用去掉功能词后的内容词再查一次 BM25，不调用模型",
+    "owner": "rag",
+    "tier": "CHOICE",
+    "phase": "answer",
+    "tradeoff": "只在第一次全文命中不足时追加候选；默认关，避免在没有查找金标准时改变召回",
+    "enforcement": "rag.py 读 case.json 注入 RAG_QUERY_EXPAND；rag Config 把 local/true 视为打开",
+    "sanctioned": {
+      "env": "RAG_QUERY_EXPAND",
+      "gui_control": "query_expand",
       "default_on": false,
       "answer_persist": true
     }

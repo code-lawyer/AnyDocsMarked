@@ -12,6 +12,8 @@ class ConversionResult:
     assets: relative-path -> raw bytes for extracted images to write alongside the md
     confidences: per-region OCR recognition scores when the backend exposes them,
             else None; consumed by the quality check to flag low-confidence output.
+    notices: reasons that belong in the report warning list, never in ``text``.
+    page_map: "native" when ``text`` already carries authoritative page markers.
     """
 
     text: str
@@ -20,6 +22,8 @@ class ConversionResult:
     assets: dict[str, bytes] = field(default_factory=dict)
     confidences: list[float] | None = None
     cross_check_reasons: list[str] | None = None
+    notices: list[str] | None = None
+    page_map: str | None = None
 
 
 class OCRUnavailableError(RuntimeError):

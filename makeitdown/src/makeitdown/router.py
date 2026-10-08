@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from .magic import sniff_container
+
 NATIVE_EXTS = {
     ".docx", ".xlsx", ".pptx", ".html", ".htm",
     ".csv", ".json", ".xml", ".txt", ".md", ".epub",
@@ -10,6 +12,8 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
 LEGACY_BINARY_EXTS = {".doc", ".wps"}
 # 老式二进制 Office,markitdown 读不了、也无既有转换路径 —— 交给 anydoc 直转。
 ANYDOC_EXTS = {".ppt", ".xls", ".xlsb"}
+# Names that look like Office Open XML but may actually be OLE2 containers.
+_OFFICE_ZIP_EXTS = {".docx", ".xlsx", ".pptx"}
 # OS-generated artifacts, not case content — appear after the OS browses the
 # folder (Explorer/Finder). Excluded at iteration time so they never enter the
 # report at all (not even as skipped_unsupported): a downstream source-level
@@ -39,6 +43,13 @@ def _pdf_avg_chars_per_page(path: Path) -> float:
 def classify(path: Path, text_threshold: int = 50) -> str:
     """Return one of "native", "ocr", "legacy", "anydoc", "unsupported"."""
     ext = path.suffix.lower()
+    if ext in _OFFICE_ZIP_EXTS:
+        try:
+            container = sniff_container(path)
+        except OSError:
+            container = "unknown"
+        if container == "ole2":
+            return "legacy"
     if ext == ".pdf":
         return "native" if _pdf_avg_chars_per_page(path) >= text_threshold else "ocr"
     if ext in NATIVE_EXTS:

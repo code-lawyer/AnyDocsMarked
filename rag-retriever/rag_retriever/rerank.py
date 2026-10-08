@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from .config import Config
+from .passage_clean import clean_passage
 
 
 class Reranker(Protocol):
@@ -19,12 +20,14 @@ class LocalReranker:
     def __init__(self, model_name: str):
         from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-        self._model = TextCrossEncoder(model_name=model_name)
+        # Positional: the model name is the first argument, and the unit test
+        # replaces this class with a one-argument callable.
+        self._model = TextCrossEncoder(model_name)
 
     def rerank(self, query: str, hits: list[dict], k: int) -> list[dict]:
         if not hits:
             return []
-        scores = list(self._model.rerank(query, [h["text"] for h in hits]))
+        scores = list(self._model.rerank(query, [clean_passage(h["text"]) for h in hits]))
         order = sorted(range(len(hits)), key=lambda i: scores[i], reverse=True)
         out = []
         for i in order[:k]:

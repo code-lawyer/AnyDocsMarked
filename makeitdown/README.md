@@ -11,7 +11,9 @@
 - 递归扫描输入目录,按文件类型自动路由:
   - **原生文档**(Word/Excel/PPT、HTML、csv/json/xml、txt/md、epub、**有文字层的 PDF**)→ markitdown
   - **扫描件 / 图片型 PDF / 图片** → PaddleOCR(PDF 用 PyMuPDF 检测文字层,每页平均字符低于阈值即判扫描件)
-  - **老式二进制 Office**:`.doc/.wps` 先嗅探内核(实为 .docx 的直转),真二进制优先用已装的 Word/WPS 或 LibreOffice,**都没有则用内置 anydoc 进程内直转**;`.ppt/.xls/.xlsb` 直接由 anydoc 转换。加密件跳过并提示。
+  - **老式二进制 Office**:`.doc/.wps` 先嗅探内核(实为 .docx 的直转),真二进制优先用已装的 Word/WPS 或 LibreOffice,**都没有则用内置 anydoc 进程内直转**;`.ppt/.xls/.xlsb` 直接由 anydoc 转换。加密件跳过并提示。名叫 `.docx` 但文件头是 OLE 的文件走 legacy。
+- 默认 PDF 仍是 MarkItDown，由平均字数路由选择。`--pdf-reader-inspector` 默认关，不改变这条默认路径。
+- `--pdf-reader-inspector` 需要 `pip install "makeitdown[pdf]"`。成功时按页写 `<!-- page: N -->`。未安装或提取出错则退回原路径并记 warning，文件不因此失败。某一页无法 OCR 时该页正文为空并记 warning，可信页保留。其他崩溃仍可使该文件失败。
 - 输出**镜像输入目录结构**的 `.md`,每个文件带 YAML frontmatter(来源、引擎、原件与正文 SHA-256 等),便于溯源与篡改检测。
 - 单文件出错不中断整批,结果汇总到 `report.json`。
 
@@ -68,6 +70,7 @@ makeitdown <输入目录> -o <输出目录>
 | `--workers N` | 并发数(默认按 CPU 核数) |
 | `--skip-existing` | 输出比源新则跳过(轻量增量) |
 | `--no-quality-check` | 关闭输出质检 |
+| `--pdf-reader-inspector` | 可选，默认关。需 `pip install "makeitdown[pdf]"`。成功时按页写 `<!-- page: N -->`。未安装或提取出错则退回原路径并记 warning，不因此失败。无法 OCR 的页正文为空并记 warning。其他崩溃仍可使该文件失败 |
 
 > 质检阈值(`--warn-min-chars`、`--warn-garbled-ratio`、`--warn-min-confidence`…)、云端 token、模型选择等全部选项见 `makeitdown --help`。
 

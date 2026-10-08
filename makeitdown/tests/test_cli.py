@@ -319,3 +319,18 @@ def test_list_knobs_flag_returns_zero_and_prints_json(capsys):
 
     assert main(["--list-knobs"]) == 0
     json.loads(capsys.readouterr().out)  # valid JSON, no crash
+
+
+def test_cli_pdf_reader_inspector_reaches_convert_tree(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cli, "convert_tree",
+                        lambda input_dir, output_dir, **kw: captured.update(kw) or _report())
+    monkeypatch.delenv("PADDLEOCR_AISTUDIO_TOKEN", raising=False)
+    src = tmp_path / "in"
+    src.mkdir()
+
+    cli.main([str(src), "--ocr-engine", "local"])
+    assert captured["pdf_reader_inspector"] is False
+
+    cli.main([str(src), "--ocr-engine", "local", "--pdf-reader-inspector"])
+    assert captured["pdf_reader_inspector"] is True

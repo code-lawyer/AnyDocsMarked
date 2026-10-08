@@ -53,3 +53,19 @@ def test_pdf_without_text_layer_is_ocr(tmp_path, monkeypatch):
     p.write_bytes(b"%PDF-1.4")
     monkeypatch.setattr(router, "_pdf_avg_chars_per_page", lambda path: 3.0)
     assert router.classify(p, text_threshold=50) == "ocr"
+
+
+OLE2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+ZIP = b"PK\x03\x04"
+
+
+def test_docx_with_ole_header_is_legacy(tmp_path):
+    path = tmp_path / "contract.docx"
+    path.write_bytes(OLE2 + b"not a zip")
+    assert router.classify(path) == "legacy"
+
+
+def test_docx_with_zip_header_stays_native(tmp_path):
+    path = tmp_path / "contract.docx"
+    path.write_bytes(ZIP + b"not a real docx")
+    assert router.classify(path) == "native"

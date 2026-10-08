@@ -119,6 +119,37 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(report["succeeded"], 2)
             self.assertEqual(rc, 0)
 
+    def test_convert_forwards_pdf_reader_inspector(self):
+        with tempfile.TemporaryDirectory() as td:
+            md = Path(td) / "_md"
+            md.mkdir()
+            with mock.patch.object(ingest.subprocess, "run", return_value=_FakeProc(0)) as m:
+                ingest._run_convert(
+                    Path(td) / "原始资料", md, ocr_engine="local", cloud_consent=False,
+                    workers=1, skip_existing=False, dry_run=False,
+                    pdf_reader_inspector=True)
+            self.assertIn("--pdf-reader-inspector", m.call_args.args[0])
+
+    def test_main_forwards_pdf_reader_inspector(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            raw = case / "原始资料"
+            raw.mkdir()
+            (raw / "a.txt").write_text("x", encoding="utf-8")
+            captured = {}
+
+            def fake_convert(*args, **kwargs):
+                captured.update(kwargs)
+                return _conv(), 0
+
+            with mock.patch.object(ingest, "_run_convert", side_effect=fake_convert), \
+                 mock.patch.object(ingest, "_preflight", return_value=None), \
+                 mock.patch.object(ingest, "_run_init_case"), \
+                 mock.patch.object(ingest, "_run_index", return_value=(None, False)), \
+                 mock.patch.object(ingest, "_run_reconcile", return_value=([], [])):
+                ingest.main([str(case), "--skip-index", "--pdf-reader-inspector"])
+            self.assertIs(captured.get("pdf_reader_inspector"), True)
+
     def test_convert_no_report_returns_none(self):
         with tempfile.TemporaryDirectory() as td:
             md = Path(td) / "_md"; md.mkdir()
@@ -421,6 +452,14 @@ class ParserChoiceFlagsTests(unittest.TestCase):
         self.assertFalse(args.structure_headings)
         self.assertFalse(args.rag_parent_context)
 
+    def test_parser_accepts_pdf_reader_inspector(self):
+        args = ingest._build_parser().parse_args(["/case", "--pdf-reader-inspector"])
+        self.assertTrue(args.pdf_reader_inspector)
+
+    def test_pdf_reader_inspector_defaults_off(self):
+        args = ingest._build_parser().parse_args(["/case"])
+        self.assertFalse(args.pdf_reader_inspector)
+
 
 class RunIndexParentContextTests(unittest.TestCase):
     def _capture_env_during_index(self, parent_context):
@@ -462,6 +501,14 @@ class BuildConvertArgvTests(unittest.TestCase):
 
     def test_includes_structure_headings_when_enabled(self):
         self.assertIn("--structure-headings", self._base(structure_headings=True))
+
+    def test_includes_pdf_reader_inspector_when_enabled(self):
+        argv = self._base(pdf_reader_inspector=True)
+        self.assertIn("--pdf-reader-inspector", argv)
+
+    def test_omits_pdf_reader_inspector_by_default(self):
+        argv = self._base()
+        self.assertNotIn("--pdf-reader-inspector", argv)
 
     def test_never_disables_quality_check(self):
         # FLOOR: sanctioned 路径绝不关质检，无论其它选项如何。

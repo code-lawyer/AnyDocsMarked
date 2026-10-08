@@ -155,3 +155,25 @@ def test_unimplemented_cloud_rerank_is_rejected_by_config(monkeypatch):
 
     with pytest.raises(ValueError, match=r"RAG_RERANK.*none.*local"):
         Config.load()
+
+
+def test_query_expand_defaults_off(monkeypatch):
+    monkeypatch.delenv("RAG_QUERY_EXPAND", raising=False)
+    assert Config.load().query_expand is False
+
+
+def test_query_expand_accepts_local_token(monkeypatch):
+    monkeypatch.setenv("RAG_QUERY_EXPAND", "local")
+    assert Config.load().query_expand is True
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "local", "LOCAL", " yes "])
+def test_query_expand_truthy_tokens(monkeypatch, value):
+    monkeypatch.setenv("RAG_QUERY_EXPAND", value)
+    assert Config.load().query_expand is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", "none", ""])
+def test_query_expand_other_tokens_stay_off(monkeypatch, value):
+    monkeypatch.setenv("RAG_QUERY_EXPAND", value)
+    assert Config.load().query_expand is False

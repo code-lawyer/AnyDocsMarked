@@ -45,7 +45,8 @@ cp .env.example .env   # then pick your embedding backend
 | `RAG_CHUNK_STRATEGY` | `structure` | heading/table/legal-marker aware; `token` for plain packing |
 | `RAG_HYBRID` | `1` | BM25 + vector RRF; `0` for pure vector |
 | `RAG_MIN_SCORE` | `0` | cosine floor on the vector channel (`0` = off); must be within `[0,1]`, else falls back to `0` with a warning |
-| `RAG_RERANK` | `none` | `local` loads a cross-encoder (`BAAI/bge-reranker-v2-m3`, CN-capable); the only setting that loads a model |
+| `RAG_RERANK` | `none` | `local` loads a cross-encoder (`BAAI/bge-reranker-v2-m3`, CN-capable); the only setting that loads a model. Before scoring, Markdown markers are stripped; the text returned is still the original chunk |
+| `RAG_QUERY_EXPAND` | off | when on, appends a content-word BM25 query only when the first full-text hit count is below `k`; `local` counts as on |
 | `RAG_PARENT_CONTEXT` | `false` | small-to-big retrieval; every hit has a stable `parent_text` (`None` when off); enabling needs a re-index |
 
 Other knobs (`RAG_RRF_K`, `RAG_HYBRID_CANDIDATES`, `RAG_PARENT_TOKENS`) are documented in `.env.example`.

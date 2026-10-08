@@ -173,10 +173,11 @@ def _run_init_case(case_dir: Path, *, dry_run: bool) -> None:
 def build_convert_argv(raw_dir: Path, md_dir: Path, *, ocr_engine: str, workers: int,
                        cloud_consent: bool, skip_existing: bool,
                        cross_check: bool = False, cross_check_mode: str = "cloud",
-                       structure_headings: bool = False) -> list[str]:
+                       structure_headings: bool = False,
+                       pdf_reader_inspector: bool = False) -> list[str]:
     """拼 makeitdown 命令（sanctioned 路径的单一来源，供 _run_convert 与契约测试复用）。
     FLOOR 保证：绝不产出 --no-quality-check（质检是下限，不由本路径关闭）。CHOICE 项
-    （cross-check / structure-headings）默认关，仅在显式启用时透传。"""
+    （cross-check / structure-headings / pdf-reader-inspector）默认关，仅在显式启用时透传。"""
     argv = ["makeitdown", raw_dir.as_posix(), "-o", md_dir.as_posix(),
             "--ocr-engine", ocr_engine, "--workers", str(workers)]
     if cloud_consent:
@@ -187,18 +188,22 @@ def build_convert_argv(raw_dir: Path, md_dir: Path, *, ocr_engine: str, workers:
         argv += ["--ocr-cross-check", "--cross-check-mode", cross_check_mode]
     if structure_headings:
         argv.append("--structure-headings")
+    if pdf_reader_inspector:
+        argv.append("--pdf-reader-inspector")
     return argv
 
 
 def _run_convert(raw_dir: Path, md_dir: Path, *, ocr_engine: str, cloud_consent: bool,
                  workers: int, skip_existing: bool, dry_run: bool,
                  cross_check: bool = False, cross_check_mode: str = "cloud",
-                 structure_headings: bool = False) -> tuple[dict | None, int]:
+                 structure_headings: bool = False,
+                 pdf_reader_inspector: bool = False) -> tuple[dict | None, int]:
     cmd = build_convert_argv(
         raw_dir, md_dir, ocr_engine=ocr_engine, workers=workers,
         cloud_consent=cloud_consent, skip_existing=skip_existing,
         cross_check=cross_check, cross_check_mode=cross_check_mode,
-        structure_headings=structure_headings)
+        structure_headings=structure_headings,
+        pdf_reader_inspector=pdf_reader_inspector)
     _say("将执行: " + " ".join(cmd))
     if dry_run:
         return None, 0
@@ -273,6 +278,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="双 OCR 校验器模式（透传给 makeitdown）")
     p.add_argument("--structure-headings", action="store_true",
                    help="用 LLM 重建标题层级（需 MAKEITDOWN_LLM_* 环境变量 + consent）")
+    p.add_argument("--pdf-reader-inspector", action="store_true",
+                   help="PDF 按页读取文字层（透传给 makeitdown；未安装 extra 或提取失败则退回并警告）")
     p.add_argument("--rag-parent-context", action="store_true",
                    help="small-to-big：索引期返回父块上下文（设 RAG_PARENT_CONTEXT）")
     return p
@@ -321,7 +328,8 @@ def main(argv: list[str]) -> int:
         raw, md, ocr_engine=args.ocr_engine, cloud_consent=args.cloud_consent,
         workers=args.workers, skip_existing=args.skip_existing, dry_run=args.dry_run,
         cross_check=args.ocr_cross_check, cross_check_mode=args.cross_check_mode,
-        structure_headings=args.structure_headings)
+        structure_headings=args.structure_headings,
+        pdf_reader_inspector=args.pdf_reader_inspector)
 
     if args.dry_run:
         _run_index(case, dry_run=True)

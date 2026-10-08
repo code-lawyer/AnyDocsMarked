@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "makeitdown"
 # Tracks the AnyDocsMarked bundle release tag (vX.Y.Z); bump together when tagging.
-version = "2.0.0"
+version = "2.1.0"
 description = "Batch convert documents to high-fidelity Markdown for LLM knowledge bases"
 license = { text = "MIT" }
 classifiers = ["License :: OSI Approved :: MIT License"]
@@ -20,6 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 local = ["paddleocr[doc-parser]", "paddlepaddle"]
+# Per-page PDF text. Not a default dependency; the reader imports it only when asked.
+pdf = ["pdf-inspector==1.24.0"]
 # Legacy .doc/.wps conversion via an already-installed Word/WPS on Windows.
 # Installs nothing but the COM bridge; it drives an app the user already has.
 com = ["pywin32 ; platform_system=='Windows'"]

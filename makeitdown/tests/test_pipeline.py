@@ -2,8 +2,12 @@ import json
 import hashlib
 import os
 import shutil
+import sys
+import types
 from pathlib import Path
+from types import SimpleNamespace
 
+import makeitdown.pdf_reader as pdf_reader
 import makeitdown.pipeline as pl
 import makeitdown.pipeline as pipeline_mod
 from makeitdown import convert_anydoc
@@ -717,3 +721,345 @@ def test_real_xls_roundtrip_through_anydoc(tmp_path):
     md = (tmp_path / "out" / "ledger.md").read_text(encoding="utf-8")
     assert "engine: anydoc" in md
     assert "1,234,567.89" in md  # 金额逐字保真(真 anydoc 转换)
+
+
+def _pdf_reader_kwargs(out, **over):
+    kw = dict(
+        ocr_engine="local", ocr_model=None, cloud_token=None, workers=1,
+        skip_existing=False, text_threshold=50, report_path=out / "report.json",
+        progress=False,
+    )
+    kw.update(over)
+    return kw
+
+
+def _trusted_pdf_result():
+    return ConversionResult(
+        text="<!-- page: 1 -->\n" + ("逐页合同正文" * 8),
+        engine="pdf-inspector",
+        pages=1,
+        page_map="native",
+        notices=["kept notice"],
+        confidences=[0.1],
+        cross_check_reasons=["kept cross-check"],
+    )
+
+
+def test_pdf_reader_result_skips_convert_native(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    native = {"n": 0}
+
+    def convert_native(p):
+        native["n"] += 1
+        return ConversionResult(text="原生正文" * 8, engine="markitdown")
+
+    monkeypatch.setattr(pl, "convert_native", convert_native)
+    calls = {}
+
+    def fake_read(path, *, dispatcher, cloud_consent):
+        calls["n"] = calls.get("n", 0) + 1
+        calls["cloud_consent"] = cloud_consent
+        calls["name"] = Path(path).name
+        assert dispatcher is not None
+        return _trusted_pdf_result()
+
+    monkeypatch.setattr(pl, "read_pdf", fake_read, raising=False)
+    report = pl.convert_tree(
+        src, out, **_pdf_reader_kwargs(out, pdf_reader_inspector=True, cloud_consent=True))
+
+    assert calls["n"] == 1
+    assert calls["cloud_consent"] is True
+    assert calls["name"] == "a.pdf"
+    assert native["n"] == 0
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "逐页合同正文" in md
+    assert "engine: pdf-inspector" in md
+    assert "page_map:" not in md
+    reasons = report["warnings"][0]["reasons"]
+    assert reasons[0] == "kept notice"
+    assert "kept cross-check" in reasons
+    assert any("low-confidence" in r for r in reasons)
+
+
+def test_pdf_reader_result_skips_ocr_dispatch(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "scan.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "ocr")
+    native = {"n": 0}
+    ocr = {"n": 0}
+    structured = {"n": 0}
+    monkeypatch.setattr(pl, "convert_native", lambda p: native.__setitem__("n", native["n"] + 1))
+
+    class _Disp:
+        def __init__(self, **k):
+            pass
+
+        def convert(self, p):
+            ocr["n"] += 1
+            return ConversionResult(text="扫描正文" * 8, engine="local:pp-structurev3")
+
+    class _Struct:
+        def restructure(self, text):
+            structured["n"] += 1
+            return text, "llm", None
+
+    monkeypatch.setattr(pl, "OCRDispatcher", _Disp)
+    monkeypatch.setattr(
+        pl, "read_pdf",
+        lambda path, *, dispatcher, cloud_consent: _trusted_pdf_result(),
+        raising=False,
+    )
+    report = pl.convert_tree(
+        src, out, **_pdf_reader_kwargs(out, pdf_reader_inspector=True, structurer=_Struct()))
+
+    assert ocr["n"] == 0
+    assert native["n"] == 0
+    assert structured["n"] == 0
+    assert report["structured"] == 0
+    assert "逐页合同正文" in (out / "scan.md").read_text(encoding="utf-8")
+
+
+def test_pdf_reader_none_uses_native_branch(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    native = {"n": 0}
+
+    def convert_native(p):
+        native["n"] += 1
+        return ConversionResult(text="原生正文" * 8, engine="markitdown")
+
+    monkeypatch.setattr(pl, "convert_native", convert_native)
+    monkeypatch.setattr(
+        pl, "read_pdf", lambda path, *, dispatcher, cloud_consent: None, raising=False)
+    report = pl.convert_tree(src, out, **_pdf_reader_kwargs(out, pdf_reader_inspector=True))
+
+    assert native["n"] == 1
+    assert report["succeeded"] == 1
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "原生正文" in md
+    assert "engine: markitdown" in md
+
+
+def test_pdf_reader_none_uses_ocr_branch(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "scan.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "ocr")
+    native = {"n": 0}
+    ocr = {"n": 0}
+    monkeypatch.setattr(pl, "convert_native", lambda p: native.__setitem__("n", native["n"] + 1))
+
+    class _Disp:
+        def __init__(self, **k):
+            pass
+
+        def convert(self, p):
+            ocr["n"] += 1
+            return ConversionResult(text="扫描正文" * 8, engine="local:pp-structurev3")
+
+    monkeypatch.setattr(pl, "OCRDispatcher", _Disp)
+    monkeypatch.setattr(
+        pl, "read_pdf", lambda path, *, dispatcher, cloud_consent: None, raising=False)
+    report = pl.convert_tree(src, out, **_pdf_reader_kwargs(out, pdf_reader_inspector=True))
+
+    assert ocr["n"] == 1
+    assert native["n"] == 0
+    assert report["succeeded"] == 1
+    assert "扫描正文" in (out / "scan.md").read_text(encoding="utf-8")
+
+
+def test_pdf_reader_skips_non_pdf(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.docx").write_text("x", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    calls = {"n": 0}
+
+    def fake_read(path, *, dispatcher, cloud_consent):
+        calls["n"] += 1
+        return _trusted_pdf_result()
+
+    monkeypatch.setattr(pl, "read_pdf", fake_read, raising=False)
+    monkeypatch.setattr(
+        pl, "convert_native",
+        lambda p: ConversionResult(text="原生文档" * 8, engine="markitdown"),
+    )
+    report = pl.convert_tree(src, out, **_pdf_reader_kwargs(out, pdf_reader_inspector=True))
+
+    assert calls["n"] == 0
+    assert report["succeeded"] == 1
+    assert "原生文档" in (out / "a.md").read_text(encoding="utf-8")
+
+
+def _body(md: str) -> str:
+    return md.split("---", 2)[-1]
+
+
+def _fake_inspector(monkeypatch, *, pages=None, error=None):
+    fake = types.ModuleType("pdf_inspector")
+
+    def extract_pages_markdown(path):
+        if error is not None:
+            raise error
+        return SimpleNamespace(pages=pages)
+
+    fake.extract_pages_markdown = extract_pages_markdown
+    monkeypatch.setitem(sys.modules, "pdf_inspector", fake)
+
+
+def test_inspector_extract_error_warns_and_keeps_default_body(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    _fake_inspector(monkeypatch, error=RuntimeError("boom"))
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(
+        pl, "convert_native",
+        lambda p: ConversionResult(text="原生正文" * 8, engine="markitdown"),
+    )
+    report = pl.convert_tree(src, out, **_pdf_reader_kwargs(out, pdf_reader_inspector=True))
+
+    sentence = "pdf-inspector unavailable; used the default PDF path"
+    assert report["failed"] == 0
+    assert report["succeeded"] == 0
+    assert report["warned"] == 1
+    assert report["warnings"] == [{"file": "a.pdf", "reasons": [sentence]}]
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "engine: markitdown" in md
+    assert "原生正文" in _body(md)
+    assert sentence not in _body(md)
+    assert sentence in md
+
+
+def test_all_ocr_fallback_does_not_warn_about_inspector(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    _fake_inspector(
+        monkeypatch,
+        pages=[
+            SimpleNamespace(page=0, markdown="", needs_ocr=True),
+            SimpleNamespace(page=1, markdown="   ", needs_ocr=False),
+        ],
+    )
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(
+        pl, "convert_native",
+        lambda p: ConversionResult(text="原生正文" * 8, engine="markitdown"),
+    )
+    report = pl.convert_tree(src, out, **_pdf_reader_kwargs(out, pdf_reader_inspector=True))
+
+    assert report["succeeded"] == 1
+    assert report["warned"] == 0
+    assert report["failed"] == 0
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "engine: markitdown" in md
+    assert "pdf-inspector unavailable" not in md
+    assert "原生正文" in _body(md)
+
+
+def test_cloud_consent_required_keeps_trusted_page(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    monkeypatch.setattr(
+        pdf_reader, "_extract_pages",
+        lambda path: [
+            SimpleNamespace(page=0, markdown="Article 3 50,000.00", needs_ocr=False),
+            SimpleNamespace(page=1, markdown="", needs_ocr=True),
+        ],
+    )
+    monkeypatch.setattr(
+        pdf_reader, "_render_page",
+        lambda pdf, page_index, dest: Path(dest).write_bytes(b""),
+    )
+    monkeypatch.delenv("MAKEITDOWN_CLOUD_CONSENT", raising=False)
+    report = pl.convert_tree(
+        src, out,
+        **_pdf_reader_kwargs(
+            out,
+            pdf_reader_inspector=True,
+            ocr_engine="cloud",
+            cloud_token="tok",
+            cloud_consent=False,
+            quality_check=False,
+        ),
+    )
+    notice = "pdf page 2 needs OCR; local engine unavailable and cloud consent is off"
+    assert report["failed"] == 0
+    assert report["warned"] == 1
+    assert report["warnings"][0]["reasons"] == [notice]
+    md = (out / "a.md").read_text(encoding="utf-8")
+    assert "50,000.00" in _body(md)
+    assert "<!-- page: 1 -->" in _body(md)
+    assert "<!-- page: 2 -->" in _body(md)
+    assert notice not in _body(md)
+    assert "engine: pdf-inspector" in md
+
+
+def test_render_crash_fails_the_file_without_markdown(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    monkeypatch.setattr(
+        pdf_reader, "_extract_pages",
+        lambda path: [
+            SimpleNamespace(page=0, markdown="Article 3 50,000.00", needs_ocr=False),
+            SimpleNamespace(page=1, markdown="", needs_ocr=True),
+        ],
+    )
+
+    def render(pdf, page_index, dest):
+        raise RuntimeError("render boom")
+
+    monkeypatch.setattr(pdf_reader, "_render_page", render)
+    report = pl.convert_tree(src, out, **_pdf_reader_kwargs(out, pdf_reader_inspector=True))
+
+    assert report["failed"] == 1
+    assert report["warned"] == 0
+    assert report["succeeded"] == 0
+    assert not (out / "a.md").exists()
+    assert "RuntimeError" in report["failures"][0]["error"]
+
+
+def test_pdf_reader_default_off_does_not_call_read_pdf(tmp_path, monkeypatch):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.pdf").write_bytes(b"%PDF")
+    out = tmp_path / "out"
+    monkeypatch.setattr(pl, "classify", lambda p, text_threshold=50: "native")
+    calls = {"n": 0}
+    native = {"n": 0}
+
+    def fake_read(path, *, dispatcher, cloud_consent):
+        calls["n"] += 1
+        return _trusted_pdf_result()
+
+    def convert_native(p):
+        native["n"] += 1
+        return ConversionResult(text="原生正文" * 8, engine="markitdown")
+
+    monkeypatch.setattr(pl, "read_pdf", fake_read, raising=False)
+    monkeypatch.setattr(pl, "convert_native", convert_native)
+    report = pl.convert_tree(src, out, **_pdf_reader_kwargs(out))
+
+    assert calls["n"] == 0
+    assert native["n"] == 1
+    assert report["succeeded"] == 1
+    assert "engine: markitdown" in (out / "a.md").read_text(encoding="utf-8")

@@ -128,9 +128,10 @@ uv tool install --index https://mirrors.aliyun.com/pypi/simple "rag-retriever @ 
 
 用环境变量选：`RAG_EMBED_BACKEND=local|ollama`（默认 `local`）。**云端 embedding（openai/远程 ollama）已移除**——想要 bge-m3 质量走**本地** ollama，无需上云；`RAG_OLLAMA_URL` 必须是 loopback，远程端点会被硬拒。
 
-**答案侧可选加强（查询期能力，能力接线契约里标 `phase=answer`）**：这两项在**问答**阶段生效，不由摄入 GUI 控制，按需在答案环境设环境变量——
+**答案侧可选加强（查询期能力，能力接线契约里标 `phase=answer`）**：下列项在**问答**阶段生效，不由摄入 GUI 控制，按需在答案环境设环境变量——
 - `RAG_RERANK=local`：交叉编码器重排，提升精排质量；需联网下载重排模型、更慢。
 - `RAG_MIN_SCORE=<0~1>`：向量通道相关度下限，滤掉弱命中；设太高会漏检、太低无效，默认 `0`（关）。
+- `RAG_QUERY_EXPAND`：默认关，布尔开关经 case.json 注入为 `local`；仅当第一次全文命中少于请求条数时，用去掉功能词后的内容词再查一次 BM25，不调用模型。
 
 **一致性铁规**：索引与查询**必须同一 embedding 模型**，否则相似度失真。机制：rag-retriever 索引时把模型记进 `.rag/`，wrapper 查询前自动比对、不一致即降级并提示 rebuild（删 `.rag/` 重建索引）。**换模型 = 必须重建索引。**
 

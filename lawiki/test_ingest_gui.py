@@ -370,5 +370,22 @@ class WriteStopHookTests(unittest.TestCase):
             self.assertEqual(sum("stop_hook.py" in c for c in cmds), 1)  # 不重复
 
 
+class QueryExpandAnswerEnvTests(unittest.TestCase):
+    def test_query_expand_true_injects_local(self):
+        # case.json boolean True is written through as the env value "local"
+        # (the same writer RAG_RERANK uses). Only this key is set.
+        from rag import answer_env_from_case
+
+        with tempfile.TemporaryDirectory() as td:
+            case = Path(td)
+            dest = case / ".anydocsmarked"
+            dest.mkdir()
+            (dest / "case.json").write_text(
+                '{"query_expand": true}', encoding="utf-8")
+            env = answer_env_from_case(case)
+        self.assertIn("RAG_QUERY_EXPAND", env)
+        self.assertEqual(env["RAG_QUERY_EXPAND"], "local")
+
+
 if __name__ == "__main__":
     unittest.main()
